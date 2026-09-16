@@ -1,4 +1,4 @@
-# Ravenswatch Live Readout
+# Ravenswatcher
 
 A second-screen window for [Ravenswatch](https://store.steampowered.com/app/2071280/Ravenswatch/) that shows what the current run has put on the map, what the Sandman is selling, and which melodies are in play. It reads the running game and updates as you play. It changes nothing in the game.
 
@@ -6,9 +6,9 @@ Windows only.
 
 ## Install
 
-1. Download the latest `Ravenswatch Live Readout-<version>-win-x64.zip` from the [Releases page](../../releases/latest).
+1. Download the latest `Ravenswatcher-<version>-win-x64.zip` from the [Releases page](../../releases/latest).
 2. Extract the folder anywhere. There is no installer.
-3. Run `Ravenswatch Live Readout.exe`.
+3. Run `Ravenswatcher.exe`.
 
 The first time, Windows SmartScreen shows **Windows protected your PC**, because the app isn't signed with a paid certificate. Click **More info**, then **Run anyway**.
 
@@ -32,6 +32,6 @@ The app reads the game's memory to do its job, which some antivirus products tre
 
 ## Support
 
-If the tool is useful to you, there's a **Buy me a coffee** button in the settings panel.
+If the tool is useful to you, there's a **Support on Ko-fi** button in the settings panel.
 
 Problems and requests go in [Issues](../../issues).
