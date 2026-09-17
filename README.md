@@ -3,7 +3,7 @@
 
 A second-screen window for [Ravenswatch](https://store.steampowered.com/app/2071280/Ravenswatch/) that shows what the current run has put on the map, what the Sandman is selling, and which melodies are in play. It reads the running game and updates as you play. It changes nothing in the game.
 
-Windows only.
+Built for Windows. It also runs on Linux under Proton; see [Linux](#linux).
 
 ## Install
 
@@ -22,6 +22,27 @@ Start the game, then start the readout, or the other way round. The window says 
 Hover anything for details: an item's effect, a melody's effect and note count, what a map icon is.
 
 The gear opens settings: rules between the panels, a diagnostics footer, and how many map icons sit across a row.
+
+## Linux
+
+The Windows build runs on Linux when it is launched inside the game's own Proton session. That is what lets it see the game. A Linux tester got it working this way; it is not something every setup has been tried on.
+
+1. In Steam, open Ravenswatch → **Properties** → **Launch Options** and set:
+
+   ```
+   STEAM_COMPAT_LAUNCHER_SERVICE=proton %command%
+   ```
+
+2. Download and extract the Windows zip as above.
+3. Start the game. Once it is running, in a terminal:
+
+   ```
+   <steamapps>/common/SteamLinuxRuntime_sniper/pressure-vessel/bin/steam-runtime-launch-client --bus-name=com.steampowered.App2071280 -- wine <path>/Ravenswatcher.exe
+   ```
+
+   `<steamapps>` is your Steam library's `steamapps` folder (often `~/.steam/steam/steamapps`), and `<path>` is where you extracted the zip.
+
+Adding Ravenswatcher to Steam as a non-Steam game does not work. Steam gives it a Proton session of its own, and it cannot see the game from there.
 
 ## Co-op
 
