@@ -1,0 +1,74 @@
+{
+  // Compile in place: reader/win32.ts emits reader/win32.js beside it.
+  //
+  // WHY NOT AN outDir. The obvious layout is app/** -> app/dist/**, and it was
+  // the plan until the test suite was read properly. Six places climb out of
+  // their own directory with __dirname: run-all.js reaches web/test, test-
+  // sidecar.js computes the repo root, test-value-types.js climbs to app/, and
+  // test-melodies.js reaches web/assets. Every one of those gains a level under
+  // an outDir and breaks.
+  //
+  // More importantly, sidecar.js spawns the reader as
+  // path.join(__dirname, 'reader', 'stdio.js') -- ONE command for both the
+  // source layout and the packaged asar, working only because sidecar.js sits
+  // beside reader/ in both. That co-location is the seam this project has been
+  // bitten by before. Compiling in place leaves it untouched; an outDir puts it
+  // back in play for no gain.
+  //
+  // The cost is generated .js beside sources, listed in .gitignore per
+  // converted module. That is bookkeeping. The alternative is changing the test
+  // harness and the code in the same step, which is precisely what makes a
+  // packaging break impossible to bisect.
+  //
+  // NO allowJs, deliberately. With no outDir, allowJs would ask tsc to
+  // overwrite its own inputs and it refuses. Unconverted .js files are simply
+  // not compiler inputs -- they stay as they are and resolve by filename, which
+  // is what makes this port file-by-file rather than all-at-once.
+  "compilerOptions": {
+    // Electron 43 ships Node 22; nothing here needs downlevelling.
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    // CommonJS emit, not ESM. Every require() in the tree keeps working
+    // against a converted module, which is the property that lets .ts and .js
+    // coexist mid-port. Switching to ESM would make this a rewrite.
+    //
+    // node16 rather than the plain "CommonJS"/"Node" pair: TypeScript 7 removed
+    // moduleResolution node10. Because app/package.json declares no "type"
+    // field, node16 resolves these files as CommonJS, so the emit is CJS as
+    // intended -- it is the resolution algorithm that is modern, not the output.
+    "module": "node16",
+    "moduleResolution": "node16",
+
+    "strict": true,
+    // The point of the whole exercise. This codebase's stated central
+    // invariant is that null means "the sweep has not resolved this address"
+    // and 0 means "the value is genuinely zero" -- see the header of
+    // reader/state.js. strictNullChecks is the compiler enforcing by rule what
+    // is currently held by prose and code review.
+    "strictNullChecks": true,
+    // An index into an array or record may miss, and the type says so. With
+    // this on, a `!` is never needed to read one: each site checks instead.
+    "noUncheckedIndexedAccess": true,
+
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    // Emit .d.ts and source maps next to the output.
+    //
+    // The maps help when running from a checkout. They do NOT help a packaged
+    // build: package.json's files list excludes both *.js.map and *.ts, so the
+    // asar ships neither the map nor the source it points at, and a packaged
+    // stack trace names the generated .js. Shipping the maps would mean
+    // shipping the TypeScript too, which is not wanted.
+    "declaration": true,
+    "sourceMap": true,
+
+    "types": ["node"]
+  },
+
+  // Only .ts is a compiler input. Unconverted .js is untouched.
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "**/*.d.ts"]
+}
