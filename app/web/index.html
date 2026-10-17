@@ -30,6 +30,13 @@
       <div class="kicker">Live run readout</div>
     </div>
     <div class="head-cluster">
+      <!-- The two views. app.js swaps them with .view-history on <body>; the
+           live readout keeps painting underneath, so switching back shows the
+           current frame rather than waiting for the next. -->
+      <div class="tabs" role="tablist" aria-label="View">
+        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="live-view">Live</button>
+        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history">History</button>
+      </div>
       <div class="head-right" id="head-right"></div>
       <!-- Same box as the gear, but a link: it leaves the window for the
            public issues page, and main.js lets it out only because github.com
@@ -89,7 +96,7 @@
 
   <div class="rule rule-seam"></div>
 
-  <main class="body">
+  <main class="body" id="live-view">
     <div class="shop" id="shop">
       <div class="shop-head">
         <div class="kicker-row">
@@ -110,6 +117,11 @@
       <div class="tiles-list" id="tiles-list"></div>
     </div>
   </main>
+
+  <!-- Past runs, newest first. Each card expands in place to the summary. -->
+  <section class="history" id="history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="history-list" id="history-list"></div>
+  </section>
 
   <div class="rule rule-band rule-diag"></div>
   <footer class="diag" id="diag"></footer>

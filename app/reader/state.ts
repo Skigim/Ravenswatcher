@@ -26,6 +26,7 @@ import { BINDING_VTABLE_RVA } from './values';
 import type { MelodySlotView } from './melodies';
 import type { SandmanOffer, SandmanStatus } from './sandman';
 import { bucketTier, type PlacedTile } from './tiles';
+import { DEFEAT_FLAG, VICTORY_FLAG, GAME_DIFFICULTY, CURRENT_CHAPTER, type RunSummary } from './runs';
 
 // ---------------------------------------------------------------- readings --
 
@@ -236,6 +237,9 @@ const TRACKED_NAMES: readonly string[] = [
   // `found` map -- which carries the tracked names and nothing else. The
   // worker never builds a value index of its own.
   SANDMAN_SHOP_GATE,
+  // Tracked for the run-end worker, which polls them off the bindings the
+  // sweep resolves and Reader relays. Never displayed live.
+  DEFEAT_FLAG, VICTORY_FLAG, GAME_DIFFICULTY, CURRENT_CHAPTER,
 ];
 
 /** [display name, icon, map] */
@@ -468,6 +472,8 @@ export interface LiveSource {
   sandman?(): SandmanOffer[] | null;
   sandman_status?(): SandmanStatus;
   tiles?(): PlacedTile[] | null;
+  /** The next finished run not yet emitted, removed as it is taken. */
+  take_run_summary?(): RunSummary | null;
   found?(): number;
 }
 
@@ -480,6 +486,7 @@ export interface ReadStateOptions {
   sandman?: SandmanOffer[] | null;
   sandman_status?: SandmanStatus;
   tiles?: PlacedTile[] | null;
+  run_summary?: RunSummary | null;
   runtime?: {
     sweeps?: number;
     found?: number;
@@ -527,6 +534,12 @@ export interface ReadoutState {
    * so rather than waiting forever.
    */
   tiles: TileIconView[] | null;
+  /**
+   * A finished run, on the one frame that carries it, and null on every
+   * other. The main process appends it to the run history and drops a
+   * repeated id.
+   */
+  run_summary: RunSummary | null;
   /**
    * Every channel the readout paints has answered. The renderer holds the page
    * behind this so the panels appear together instead of assembling
@@ -625,6 +638,7 @@ export function readState(src: LiveSource | null, opts: ReadStateOptions = {}): 
   let sandman: SandmanOffer[] | null;
   let sandmanStatus: SandmanStatus;
   let tiles: PlacedTile[] | null;
+  let runSummary: RunSummary | null;
   if (values === null) {
     // A null `values` means live mode, which needs a source to read.
     if (src === null) throw new Error('readState: no source and no fixture values');
@@ -637,6 +651,7 @@ export function readState(src: LiveSource | null, opts: ReadStateOptions = {}): 
     sandman = live.sandman ? live.sandman() : null;
     sandmanStatus = live.sandman_status ? live.sandman_status() : 'pending';
     tiles = live.tiles ? live.tiles() : null;
+    runSummary = live.take_run_summary ? live.take_run_summary() : null;
   } else {
     // A name missing from `values` reads as unresolved, and serialises as null.
     get = (name) => reading(values[name]);
@@ -647,6 +662,7 @@ export function readState(src: LiveSource | null, opts: ReadStateOptions = {}): 
     sandman = opts.sandman === undefined ? null : opts.sandman;
     sandmanStatus = opts.sandman_status === undefined ? 'pending' : opts.sandman_status;
     tiles = opts.tiles === undefined ? null : opts.tiles;
+    runSummary = opts.run_summary === undefined ? null : opts.run_summary;
   }
 
   const level = get('Hero Level');
@@ -789,6 +805,7 @@ export function readState(src: LiveSource | null, opts: ReadStateOptions = {}): 
     // would black out the whole readout for most of a second on every map
     // change, to hold back a panel that can say "Loading…" for itself.
     tiles: groupTiles(tiles),
+    run_summary: runSummary,
     ready,
   };
 }

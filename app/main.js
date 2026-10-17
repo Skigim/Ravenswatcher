@@ -28,6 +28,7 @@ const { Worker } = require('worker_threads');
 const { createSidecar } = require('./sidecar');
 const { CACHE_DIR_NAME } = require('./assets/build');
 const { checkForUpdate } = require('./update');
+const { HISTORY_FILE, loadHistory, appendRun } = require('./history');
 
 // Windows groups taskbar buttons by AppUserModelID, and a pinned shortcut
 // carries the ID of whatever created it. Electron derives a default ID from
@@ -103,6 +104,7 @@ const STATE_CHANNEL = 'readout:state';
 const SIDECAR_DOWN_CHANNEL = 'readout:sidecar-down';
 const ASSETS_CHANNEL = 'readout:assets';
 const UPDATE_CHANNEL = 'readout:update';
+const HISTORY_CHANNEL = 'readout:history';
 
 let mainWindow = null;
 let rendererReady = false;
@@ -112,6 +114,25 @@ let rendererReady = false;
 // through pendingSends would be gone after a reload (Ctrl+R stays bound by
 // the default menu). Sent when the check lands and on every page load.
 let updateInfo = null;
+
+// The run history, loaded once at startup and appended to as runs finish.
+// Sent whole on every page load and after each append: it is small, and a
+// whole list cannot be applied out of order the way a delta could.
+let HISTORY_PATH = null;
+let history = { runs: [], skipped: 0 };
+
+function sendHistory() {
+  sendToRenderer(HISTORY_CHANNEL, history);
+}
+
+function recordRun(frame) {
+  if (!frame.run_summary || HISTORY_PATH === null) return;
+  try {
+    if (appendRun(HISTORY_PATH, history, frame.run_summary)) sendHistory();
+  } catch (err) {
+    console.error('[main] run not saved to history:', err.message);
+  }
+}
 
 function sendUpdate() {
   if (updateInfo && mainWindow && !mainWindow.isDestroyed() && rendererReady) {
@@ -195,7 +216,7 @@ const sidecar = createSidecar({
   packaged: PACKAGED,
   resourcesPath: process.resourcesPath,
   repoRoot: REPO_ROOT,
-  onFrame: (frame) => { sendToRenderer(STATE_CHANNEL, frame); maybeBuildAssets(frame); },
+  onFrame: (frame) => { recordRun(frame); sendToRenderer(STATE_CHANNEL, frame); maybeBuildAssets(frame); },
   onDown: (notice) => { assetsBuilt = false; sendToRenderer(SIDECAR_DOWN_CHANNEL, notice); },
 });
 
@@ -245,6 +266,7 @@ async function createWindow() {
     rendererReady = true;
     flushPendingSends();
     sendUpdate();
+    sendHistory();
   });
 
   // loadFile() resolves relative paths against the app root (app/), and
@@ -272,6 +294,12 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     CACHE_DIR = path.join(app.getPath('userData'), CACHE_DIR_NAME);
+    HISTORY_PATH = path.join(app.getPath('userData'), HISTORY_FILE);
+    try {
+      history = loadHistory(HISTORY_PATH);
+    } catch (err) {
+      console.error('[main] run history unreadable:', err.message);
+    }
     protocol.handle('asset', serveAsset);
     sendCachedTables();
     sidecar.start();

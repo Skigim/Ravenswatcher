@@ -46,6 +46,9 @@ sandman-worker.ts
 tiles.ts       the placed-tile roster and its reward selectors
 tiles-worker.ts
                the roster read on its own worker thread
+runs.ts        the run-end channel: run record, selected talents, score page
+               and the score readiness rule
+runs-worker.ts the end-of-run capture on its own worker thread
 state.ts       the output contract
 sweeper.js     the discovery sweep (values, placement, melodies), on a
                worker thread

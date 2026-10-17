@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Melodies update again when you start or complete one, after the game update.
+* New History tab: every run you finish is saved with its result, hero, difficulty, score, talents and full end-of-run statistics. Click a run to see the details.
 
 ## 0.1.5 — 2026-10-12
 

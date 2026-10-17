@@ -1,11 +1,12 @@
 'use strict';
-// Attach, run the three workers, hand back a polling source.
+// Attach, run the four workers, hand back a polling source.
 
 const path = require('path');
 const { Worker } = require('worker_threads');
 const { openProcess, findPid, moduleBase } = require('./win32');
 const { pollBinding } = require('./values');
 const { PROCESS_NAME, SANDMAN_SHOP_GATE } = require('./state');
+const { RUN_VALUE_NAMES } = require('./runs');
 
 class Reader {
   constructor(pid) {
@@ -24,6 +25,10 @@ class Reader {
     this.sandmanData = null;
     this.sandmanStatus = 'pending';
     this.tilesRoster = null;
+    // Finished runs not yet emitted. A queue, not a slot: two runs ending
+    // inside one poll is not expected, but losing one would be silent.
+    this.runSummaries = [];
+    this._lastRelayedRunValues = null;
     this.sweeps = 0;
     this.bindingVtReady = false;
     this.fatal = null;
@@ -36,13 +41,16 @@ class Reader {
     // than wait for the next poll -- see stdio.js, which uses it to emit a
     // frame the moment an offer flips to sold instead of up to POLL_MS later.
     this.onSandmanChange = null;
+    // The same, for a finished run: stdio.js emits it at once.
+    this.onRunSummary = null;
 
     this.worker = this._spawn('sweeper.js', (m) => this._handleSweepMessage(m));
     this.sandmanWorker = this._spawn('sandman-worker.js', (m) => this._handleSandmanMessage(m));
     this.tilesWorker = this._spawn('tiles-worker.js', (m) => this._handleTilesMessage(m));
+    this.runsWorker = this._spawn('runs-worker.js', (m) => this._handleRunsMessage(m));
   }
 
-  // Each worker opens its own handle to the same PID. The three share one
+  // Each worker opens its own handle to the same PID. The four share one
   // failure vocabulary: 'fatal' and 'gone' stop the reader, 'diagnostic' is
   // something a human should see that must not stop the reader or break a
   // bench loop watching .fatal. Everything else goes to the worker's own
@@ -107,6 +115,18 @@ class Reader {
           ? { type: 'gate', addr: gateAddr, variant: gateEntry.variant, is_float: gateEntry.is_float }
           : { type: 'gate', addr: null, variant: null, is_float: false });
       }
+      // The run-end worker polls its values itself; relay their bindings
+      // whenever any of them changes, including to absent.
+      const runValues = {};
+      for (const name of RUN_VALUE_NAMES) {
+        const e = m.found && m.found[name];
+        if (e) runValues[name] = { addr: e.binding_addr, variant: e.variant, is_float: e.is_float };
+      }
+      const runKey = JSON.stringify(runValues);
+      if (runKey !== this._lastRelayedRunValues) {
+        this._lastRelayedRunValues = runKey;
+        this.runsWorker.postMessage({ type: 'values', bindings: runValues });
+      }
     } else if (m.type === 'binding_vt') {
       this.bindingVtReady = m.ready;
     }
@@ -124,6 +144,21 @@ class Reader {
 
   _handleTilesMessage(m) {
     if (m.type === 'tiles') this.tilesRoster = m.tiles;
+  }
+
+  _handleRunsMessage(m) {
+    if (m.type !== 'run' || !m.summary) return;
+    const map = m.summary.map;
+    this.runSummaries.push({
+      ...m.summary,
+      map_name: map !== null && this.mapNames[map] !== undefined ? this.mapNames[map] : null,
+    });
+    if (typeof this.onRunSummary === 'function') this.onRunSummary();
+  }
+
+  /** The oldest finished run not yet emitted, or null. Removes it. */
+  take_run_summary() {
+    return this.runSummaries.length ? this.runSummaries.shift() : null;
   }
 
   clearRun() {
@@ -187,6 +222,7 @@ class Reader {
     this.worker.terminate();
     this.sandmanWorker.terminate();
     this.tilesWorker.terminate();
+    this.runsWorker.terminate();
     this.proc.close();
   }
 }

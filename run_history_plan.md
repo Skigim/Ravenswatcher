@@ -4,7 +4,10 @@ This plan adds run history to Ravenswatcher: when a run ends, the overlay
 records what the victory or defeat summary showed, keeps it across runs and
 app updates, and lets the player look back over past runs.
 
-It's a plan, not the feature. The evidence comes from three solo defeats on
+The first version is built: `app/reader/runs.ts` and `runs-worker.ts`
+capture the run, `app/history.ts` stores it, and the **History** tab shows
+it. The rest of this file is the design it follows and the evidence behind
+it. The evidence comes from three solo defeats on
 October 15, 2026, and a two-player defeat on October 16, each matched against
 the summary screen and player-supplied build details:
 
@@ -199,11 +202,13 @@ weren't logged or were cut off in the screenshot are `null`:
 
 A **History** tab beside the live readout:
 
-- A list, newest first. Each row shows the date, hero portrait, **Victory** or
-  **Defeat**, the map and chapter, difficulty, time, and level reached.
-- Selecting a row opens the summary: the damage, support, sufferings, and
-  resources rows as the game words them, plus the magical objects with their
-  icons.
+- A list, newest first, laid out like a match history. Each card shows
+  **Victory** or **Defeat**, difficulty, date, time, the hero, level, map and
+  chapter, the score, and the talents as chips in their rarity colour.
+- Selecting a card opens the summary in place: the score lines, the talents
+  with rarities, and the damage, support, sufferings, and resources rows as
+  the game words them. The portrait is the hero's initial, and magical
+  objects show as a count, until their art and names can be resolved.
 - With no history yet, the tab says "Finish a run and it shows up here."
 
 Text stays in the game's own words. Nothing on screen names offsets, flags,

@@ -1027,3 +1027,221 @@ body {
 .curtain-sub[hidden] {
   display: none;
 }
+
+/* — view tabs — */
+/* Square, bordered, the gear's height: they sit in the same cluster and read
+   as the same family of control. The selected tab takes the gear's open
+   state, so "which view am I in" uses the one emphasis the header has. */
+.tabs { display: flex; gap: 2px; }
+.tab {
+  all: unset;
+  cursor: pointer;
+  height: 34px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--divider);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neutral-500);
+}
+.tab:hover { color: var(--neutral-100); }
+.tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+.tab[aria-selected="true"] {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
+}
+
+/* — run history — */
+/* The history view replaces the live panels and the curtain. body.view-history
+   outranks .curtain-active on purpose: a run ending puts the curtain up, and
+   the player looking at history must not be pulled off it. */
+body.view-history .kpis,
+body.view-history .rule-seam,
+body.view-history .body,
+body.view-history .between-runs,
+body.view-history .curtain {
+  display: none;
+}
+.history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--surface);
+}
+.history[hidden] { display: none; }
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--seam);
+}
+.history-empty {
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--surface);
+}
+/* The curtain's type, under its own names: app.js and the suites find the
+   curtain by .curtain-headline, and a second one on the page would be found
+   first. */
+.history-empty-headline {
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: -0.025em;
+  color: var(--neutral-500);
+  line-height: 1.2;
+}
+.history-empty-sub { font-size: 15px; color: var(--neutral-400); letter-spacing: 0.01em; }
+
+/* Rarity, one hue per code. Common is the neutral step; the rest climb the
+   way the game's own talent frames do, ending on the accent for Ultimate. */
+:root {
+  --rarity-common: var(--neutral-400);
+  --rarity-rare: #5aa9ff;
+  --rarity-epic: #b57cff;
+  --rarity-legendary: #d9a521;
+  --rarity-ultimate: var(--accent-500);
+  --defeat-tint: rgba(201, 75, 57, 0.10);
+}
+.talent-common { --rarity: var(--rarity-common); }
+.talent-rare { --rarity: var(--rarity-rare); }
+.talent-epic { --rarity: var(--rarity-epic); }
+.talent-legendary { --rarity: var(--rarity-legendary); }
+.talent-ultimate { --rarity: var(--rarity-ultimate); }
+.talent-unknown { --rarity: var(--neutral-600); }
+
+/* One run: a result strip down the left edge, tinted for the outcome. */
+.run { background: var(--surface); }
+.run-card {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 150px minmax(180px, 1.1fr) 110px minmax(240px, 2fr) 28px;
+  align-items: center;
+  gap: 22px;
+  padding: 14px var(--pad) 14px calc(var(--pad) - 4px);
+  border-left: 4px solid var(--accent-2-600);
+  background: var(--defeat-tint);
+  transition: background-color 80ms;
+}
+.run-victory .run-card {
+  border-left-color: var(--positive-500);
+  background: var(--positive-tint);
+}
+.run-card:hover { background-color: var(--surface-hover); }
+.run-card:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+
+.run-result { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.run-outcome {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-400);
+}
+.run-victory .run-outcome { color: var(--positive-400); }
+.run-difficulty { font-size: 13px; font-weight: 600; color: var(--neutral-100); }
+.run-when, .run-time { font-size: 11px; color: var(--neutral-500); }
+
+.run-hero { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.run-portrait {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ground);
+  border: 2px solid var(--divider);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--neutral-400);
+}
+.run-hero-text { min-width: 0; }
+.run-hero-name {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-sub { margin-top: 3px; font-size: 12px; color: var(--neutral-400); }
+
+.run-score { display: flex; flex-direction: column; gap: 2px; }
+.run-score-value {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.run-talents { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.talent {
+  padding: 4px 8px 4px 6px;
+  border-left: 3px solid var(--rarity);
+  background: var(--ground);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--neutral-100);
+  white-space: nowrap;
+}
+.run-none { font-size: 12px; color: var(--neutral-500); }
+
+.run-chevron { color: var(--neutral-500); justify-self: end; }
+.run-chevron svg { display: block; width: 18px; height: 18px; transition: transform 120ms; }
+.run-open .run-chevron svg { transform: rotate(180deg); }
+.run-card:hover .run-chevron { color: var(--neutral-100); }
+
+/* The expanded summary: the statistics page's groups, side by side. */
+.run-detail { border-left: 4px solid var(--divider); }
+.run-detail[hidden] { display: none; }
+.run-victory .run-detail { border-left-color: var(--positive-500); }
+.run-defeat .run-detail { border-left-color: var(--accent-2-600); }
+.run-columns {
+  display: grid;
+  /* auto-fit, so the seven groups share one row at the design width rather
+     than leaving a seam-coloured hole after a wrapped last block. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 2px;
+  background: var(--seam);
+}
+.run-block {
+  background: var(--ground);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.run-rows { margin: 0; display: flex; flex-direction: column; gap: 5px; }
+.run-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.run-row dt { color: var(--neutral-400); }
+.run-row dd { margin: 0; font-weight: 700; }
+.run-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.run-line-total { margin-top: 3px; font-weight: 800; font-size: 13px; }
+.talent-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-left: 7px;
+  border-left: 3px solid var(--rarity);
+}
+.talent-line-name { font-weight: 700; }
+.talent-line-rarity { color: var(--rarity); font-weight: 600; }

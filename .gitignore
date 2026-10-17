@@ -40,6 +40,15 @@
 /app/reader/tiles-worker.js
 /app/reader/tiles-worker.js.map
 /app/reader/tiles-worker.d.ts
+/app/reader/runs.js
+/app/reader/runs.js.map
+/app/reader/runs.d.ts
+/app/reader/runs-worker.js
+/app/reader/runs-worker.js.map
+/app/reader/runs-worker.d.ts
+/app/history.js
+/app/history.js.map
+/app/history.d.ts
 
 # app/assets is TypeScript throughout, so its compiled output can be globbed.
 /app/assets/*.js

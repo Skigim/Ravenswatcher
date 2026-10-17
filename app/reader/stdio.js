@@ -135,6 +135,7 @@ function main(argv) {
       timer = setInterval(tick, POLL_MS);
     }
   };
+  reader.onRunSummary = reader.onSandmanChange;
 
   tick();
   timer = setInterval(tick, POLL_MS);

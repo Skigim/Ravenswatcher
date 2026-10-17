@@ -122,8 +122,8 @@ function main() {
           check('every frame has stable key count',
             keyCounts.length === 1,
             `key counts: ${keyCounts.join(',')}`);
-          check('every frame is the 28-key envelope',
-            parsed.every(o => Object.keys(o).length === 28),
+          check('every frame is the 29-key envelope',
+            parsed.every(o => Object.keys(o).length === 29),
             `key counts: ${keyCounts.join(',')}`);
         }
 

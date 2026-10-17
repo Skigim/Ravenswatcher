@@ -324,6 +324,7 @@ function testReaderIntegration() {
   const dummyReader = Object.create(Reader.prototype);
   dummyReader.sandmanWorker = { postMessage() {} };
   dummyReader.tilesWorker = { postMessage() {} };
+  dummyReader.runsWorker = { postMessage() {} };
   dummyReader.placed = { mapId: 0, placed: ['A'] };
   dummyReader.melodiesData = ['Melody 1'];
   dummyReader.melodyStatus = 'ok';
@@ -349,6 +350,8 @@ function testReaderIntegration() {
 
   // Message contract tests on Reader instance
   const reader = Object.create(Reader.prototype);
+  // The run-end relay rides on every sweep message; a stand-in takes it.
+  reader.runsWorker = { postMessage() {} };
   reader.sandmanData = null;
   reader.sandmanStatus = 'pending';
   reader.resolved = {};

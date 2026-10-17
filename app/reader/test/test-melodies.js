@@ -7,7 +7,7 @@
 // - Multiplayer max(state) merging
 // - Strict validation failure cases (duplicate GUIDs, invalid lifecycle)
 // - Unresolved state contract (null states -> state: null, not locked)
-// - readState() contract integration (26-key envelope, unconditional melodies key)
+// - readState() contract integration (27-key envelope, unconditional melodies key)
 // - SOURCES.tsv SHA1 and byte count verification
 
 const fs = require('fs');
@@ -352,8 +352,8 @@ function testStateIntegration() {
   const fixtureLegacy = readState(null, { values: {} });
   check('fixture mode without melodies emits melodies: null',
     fixtureLegacy.melodies === null);
-  check('readState always includes melodies key in 26-key base envelope',
-    'melodies' in fixtureLegacy && Object.keys(fixtureLegacy).length === 26);
+  check('readState always includes melodies key in 27-key base envelope',
+    'melodies' in fixtureLegacy && Object.keys(fixtureLegacy).length === 27);
 
   // 3. readState with melodies payload and readiness
   const stateWithMelodies = readState(null, {
