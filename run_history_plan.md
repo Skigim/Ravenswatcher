@@ -167,8 +167,9 @@ still reads only on the flag, because the summary is the complete set.
 
 The history lives in the main process, in one file:
 `<userData>/run-history.jsonl`. `userData` is the per-user app folder Electron
-resolves from the product name (`Ravenswatcher`), so it's the same on every
-install and outlives app updates and install slots.
+resolves from the app's package name (`ravenswatch-live-readout`, not the
+product name), so it's the same on every install and outlives app updates
+and install slots. The decoded `game-assets` cache lives beside it.
 
 - One JSON object per line, one line per run, appended when a capture
   arrives. Appending never rewrites earlier runs.
