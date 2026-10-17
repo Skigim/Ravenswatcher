@@ -31,6 +31,8 @@ const SUITES = [
   ['test-no-shipped-content', () => require('./test-no-shipped-content').main()],
   ['test-coop', () => require('./test-coop').main()],
   ['test-update', () => require('./test-update').main()],
+  ['test-runs', () => require('./test-runs').main()],
+  ['test-history', () => require('./test-history').main()],
 ];
 
 // Suites that cannot run in this process. test-seams drives the real page in
@@ -43,6 +45,7 @@ const SPAWNED = [
   ['test-hover', path.join(__dirname, '..', '..', 'web', 'test', 'test-hover.js')],
   ['test-tile-done', path.join(__dirname, '..', '..', 'web', 'test', 'test-tile-done.js')],
   ['test-update-bar', path.join(__dirname, '..', '..', 'web', 'test', 'test-update-bar.js')],
+  ['test-history-view', path.join(__dirname, '..', '..', 'web', 'test', 'test-history-view.js')],
 ];
 
 /**

@@ -1,9 +1,9 @@
 // Preload script, running in the isolated context contextIsolation creates.
 //
-// Exposes four one-way (main -> renderer) subscriptions: state frames from
+// Exposes five one-way (main -> renderer) subscriptions: state frames from
 // the reader/stdio.js sidecar, a notice for when that sidecar process has
-// exited, the item tables main.js decodes from the game install, and the
-// result of the launch update check. Nothing else crosses the bridge -- not
+// exited, the item tables main.js decodes from the game install, the
+// result of the launch update check, and the run history. Nothing else crosses the bridge -- not
 // ipcRenderer itself, not a general-purpose send -- so the renderer can only
 // ever listen, never talk back to the sidecar or the main process.
 //
@@ -28,6 +28,7 @@ const STATE_CHANNEL = 'readout:state';
 const SIDECAR_DOWN_CHANNEL = 'readout:sidecar-down';
 const ASSETS_CHANNEL = 'readout:assets';
 const UPDATE_CHANNEL = 'readout:update';
+const HISTORY_CHANNEL = 'readout:history';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -60,4 +61,8 @@ contextBridge.exposeInMainWorld('ravenswatch', {
   // `latest` and `url` are null when nothing is newer, `ok` is false when
   // the check itself failed, and `reason` says why (null otherwise).
   onUpdate: subscribe(UPDATE_CHANNEL),
+
+  // callback({runs, skipped}) fires with the whole run history, oldest
+  // first, on every page load and again after each finished run is saved.
+  onHistory: subscribe(HISTORY_CHANNEL),
 });

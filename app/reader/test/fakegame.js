@@ -31,6 +31,11 @@ const PLAN = [
   // The Sandman worker's shop gate. Inline and 0 == shut, matching the live
   // reading; tracked so the sweep resolves an address for reader.js to relay.
   ['Is in sandman shop', 'inline', 0],
+  // The run-end worker's values: mid-run, so neither end flag is up.
+  ['Is in defeat sequence', 'inline', 0],
+  ['Is in victory sequence', 'inline', 0],
+  ['Game Difficulty', 'boxed-int', 2],
+  ['Current chapter', 'boxed-int', 0],                     // 0 is chapter I, a real reading
   ['Mordred_Quest_Current_Step', 'boxed-int', 0],
   ['Tree_Quest_Current_Step', 'boxed-int', 0],
   ['Roc_Quest_Current_Step', 'boxed-int', 0],

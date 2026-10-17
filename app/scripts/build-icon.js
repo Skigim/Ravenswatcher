@@ -1,9 +1,18 @@
 'use strict';
 // Original block-letter R, independent of Ravenswatch artwork. The ICO is a
 // reproducible build output; each frame embeds a PNG made by our encoder.
+// A local build/icon-local.ico, which Git ignores, replaces the R on the
+// machine that has one.
 const fs = require('fs');
 const path = require('path');
 const { encodePng } = require('../assets/png');
+
+const output = path.join(__dirname, '..', 'build', 'icon.ico');
+const local = path.join(__dirname, '..', 'build', 'icon-local.ico');
+if (fs.existsSync(local)) {
+  fs.copyFileSync(local, output);
+  return;
+}
 
 const glyph = ['11110', '10001', '10001', '11110', '10100', '10010', '10001'];
 const sizes = [16, 24, 32, 48, 64, 128, 256];
@@ -33,6 +42,5 @@ images.forEach((png, index) => {
   header.writeUInt32LE(offset, pos + 12);
   offset += png.length;
 });
-const output = path.join(__dirname, '..', 'build', 'icon.ico');
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, Buffer.concat([header, ...images]));

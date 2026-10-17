@@ -712,6 +712,7 @@ function renderDiag(s) {
   bits.push(`${s.found}/${s.tracked} values resolved`);
   bits.push(`re-sweep every ${s.sweep_interval}s`);
   bits.push(`poll ${s.poll_ms} ms`);
+  if (historySkipped) bits.push(`${historySkipped} unreadable history line${historySkipped === 1 ? "" : "s"}`);
   el("diag").textContent = bits.join(" · ");
 }
 
@@ -940,6 +941,275 @@ function renderNoTransport() {
   );
 }
 
+// — run history —
+//
+// The list arrives whole over readout:history on every page load and after
+// each finished run. Stored values are raw (seconds, codes, internal hero
+// names); everything below turns them into words at display time, so a
+// wording change never needs the file rewritten.
+
+let historyRuns = [];
+let historySkipped = 0;
+let view = "live";
+const expandedRuns = new Set();
+
+const DIFFICULTY_NAMES = { 0: "Adventure", 1: "Twilight", 2: "Darkness", 3: "Nightmare" };
+const CHAPTER_ROMAN = ["I", "II", "III"];
+const RARITY_CLASS = { 0: "common", 1: "rare", 2: "epic", 3: "legendary", 4: "ultimate" };
+
+// Statistics rows in the game's order and the game's words.
+const RUN_STAT_GROUPS = [
+  ["Damage", "damage", [
+    ["total", "Damage dealt"], ["dash", "From dash"], ["trait", "From trait"],
+    ["attack", "From attack"], ["power", "From power"], ["special", "From special"],
+    ["defense", "From defense"], ["ultimate", "From ultimate"], ["other", "Other sources"],
+    ["highest", "Highest single damage"],
+  ]],
+  ["Support", "support", [
+    ["self_heal", "Self healing"], ["ally_heal", "Healing to allies"],
+    ["self_shield", "Self shield"], ["ally_shield", "Shield to allies"],
+    ["blocked", "Damage blocked"], ["revive_assists", "Revive assists"],
+  ]],
+  ["Sufferings", "sufferings", [
+    ["taken", "Damage taken"], ["deaths_doors", "Death's doors"],
+    ["feathers", "Raven feathers consumed"],
+  ]],
+  ["Resources", "resources", [
+    ["shards_amassed", "Dream shards amassed"], ["shards_spent", "Dream shards spent"],
+    ["stars_of_fate", "Stars of fate used"], ["objects_collected", "Magical objects collected"],
+  ]],
+];
+
+// Hero codes whose display name differs. Scarlet's definition is Red_Update6
+// and her skins are Hero_Red_*, seen on a live run; every other code shown so
+// far is the hero's name.
+const HERO_NAMES = { Red: "Scarlet" };
+
+/** Heroes\Juliet_Update6.herodef.ot -> "Juliet"; falls back to the skin name. */
+function heroName(run) {
+  const def = typeof run.hero_definition === "string" ? run.hero_definition : "";
+  let code = (def.split(/[\\/]/).pop() || "").replace(/\.herodef\.ot$/i, "").replace(/_Update\d+$/i, "");
+  if (!code && typeof run.hero === "string") code = run.hero.replace(/^Hero_/, "").split("_")[0];
+  if (!code) return "Unknown hero";
+  return HERO_NAMES[code] || code.replace(/_/g, " ");
+}
+
+function difficultyName(d) {
+  if (typeof d !== "number") return DASH;
+  return DIFFICULTY_NAMES[d] || `Difficulty ${d}`;
+}
+
+function formatPlaytime(seconds) {
+  if (typeof seconds !== "number" || !(seconds >= 0)) return DASH;
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+function formatWhen(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return DASH;
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${date} · ${time}`;
+}
+
+// The statistics page rounds down: 61.73 shows as 61.
+function formatStat(v) {
+  return typeof v === "number" && Number.isFinite(v) ? Math.floor(v).toLocaleString("en-US") : DASH;
+}
+
+function where(run) {
+  const bits = [];
+  if (run.map_name) bits.push(run.map_name);
+  if (typeof run.chapter === "number" && CHAPTER_ROMAN[run.chapter]) bits.push(`Chapter ${CHAPTER_ROMAN[run.chapter]}`);
+  return bits.join(" · ");
+}
+
+function make(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function rarityClass(t) {
+  return `talent-${RARITY_CLASS[t.rarity_code] || "unknown"}`;
+}
+
+function talentChip(t) {
+  const chip = make("span", `talent ${rarityClass(t)}`, t.name);
+  setTip(chip, t.name, t.rarity || "");
+  return chip;
+}
+
+function runCard(run) {
+  const victory = run.result === "victory";
+  const open = expandedRuns.has(run.id);
+  const article = make("article", `run ${victory ? "run-victory" : "run-defeat"}`);
+  article.dataset.runId = String(run.id);
+
+  const card = make("button", "run-card");
+  card.type = "button";
+  card.setAttribute("aria-expanded", String(open));
+
+  const result = make("div", "run-result");
+  result.append(
+    make("div", "run-outcome", victory ? "Victory" : "Defeat"),
+    make("div", "run-difficulty", difficultyName(run.difficulty)),
+    make("div", "run-when", formatWhen(run.ended)),
+    make("div", "run-time", formatPlaytime(run.playtime_s)),
+  );
+
+  const hero = make("div", "run-hero");
+  const name = heroName(run);
+  const portrait = make("div", "run-portrait", name.charAt(0));
+  portrait.setAttribute("aria-hidden", "true");
+  const heroText = make("div", "run-hero-text");
+  const level = typeof run.level === "number" ? `Level ${Math.floor(run.level)}` : "";
+  heroText.append(
+    make("div", "run-hero-name", name),
+    make("div", "run-sub", [level, where(run)].filter(Boolean).join(" · ")),
+  );
+  hero.append(portrait, heroText);
+
+  const score = make("div", "run-score");
+  score.append(
+    make("div", "run-score-value", run.score && typeof run.score.total === "number"
+      ? run.score.total.toLocaleString("en-US") : DASH),
+    make("div", "kicker", "Score"),
+  );
+
+  const talents = make("div", "run-talents");
+  if (Array.isArray(run.talents) && run.talents.length) {
+    for (const t of run.talents) talents.append(talentChip(t));
+  } else {
+    talents.append(make("span", "run-none", Array.isArray(run.talents) ? "No talents" : "Talents unavailable"));
+  }
+
+  const chevron = make("div", "run-chevron");
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
+    + ' stroke-linecap="square"><path d="M6 9l6 6 6-6"></path></svg>';
+
+  card.append(result, hero, score, talents, chevron);
+  article.append(card);
+
+  const detail = runDetail(run);
+  detail.hidden = !open;
+  article.append(detail);
+  article.classList.toggle("run-open", open);
+
+  card.addEventListener("click", () => {
+    const nowOpen = !expandedRuns.has(run.id);
+    if (nowOpen) expandedRuns.add(run.id); else expandedRuns.delete(run.id);
+    card.setAttribute("aria-expanded", String(nowOpen));
+    detail.hidden = !nowOpen;
+    article.classList.toggle("run-open", nowOpen);
+  });
+  return article;
+}
+
+function statBlock(title, rows) {
+  const block = make("div", "run-block");
+  block.append(make("div", "kicker", title));
+  const list = make("dl", "run-rows");
+  for (const [label, value] of rows) {
+    const row = make("div", "run-row");
+    row.append(make("dt", "", label), make("dd", "", value));
+    list.append(row);
+  }
+  block.append(list);
+  return block;
+}
+
+function runDetail(run) {
+  const detail = make("div", "run-detail");
+
+  const scoreBlock = make("div", "run-block");
+  scoreBlock.append(make("div", "kicker", "Score"));
+  if (run.score && Array.isArray(run.score.details)) {
+    const list = make("ul", "run-lines");
+    for (const line of run.score.details) list.append(make("li", "", line));
+    list.append(make("li", "run-line-total", `Total ${run.score.total.toLocaleString("en-US")}`));
+    scoreBlock.append(list);
+  } else {
+    scoreBlock.append(make("div", "run-none", "The score wasn't recorded for this run."));
+  }
+
+  const buildBlock = make("div", "run-block");
+  buildBlock.append(make("div", "kicker", "Talents"));
+  if (Array.isArray(run.talents) && run.talents.length) {
+    const list = make("ul", "run-lines");
+    for (const t of run.talents) {
+      const li = make("li", `talent-line ${rarityClass(t)}`);
+      li.append(make("span", "talent-line-name", t.name), make("span", "talent-line-rarity", t.rarity || DASH));
+      list.append(li);
+    }
+    buildBlock.append(list);
+  } else {
+    buildBlock.append(make("div", "run-none",
+      Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run."));
+  }
+
+  const runRows = [
+    ["Hero", heroName(run)],
+    ["Difficulty", difficultyName(run.difficulty)],
+    ["Reached", where(run) || DASH],
+    ["Time", formatPlaytime(run.playtime_s)],
+    ["Level reached", typeof run.level === "number" ? run.level.toFixed(2) : DASH],
+  ];
+
+  const columns = make("div", "run-columns");
+  columns.append(scoreBlock, buildBlock, statBlock("Run", runRows));
+  for (const [title, key, rows] of RUN_STAT_GROUPS) {
+    const group = run[key] && typeof run[key] === "object" ? run[key] : {};
+    columns.append(statBlock(title, rows.map(([field, label]) => [label, formatStat(group[field])])));
+  }
+  detail.append(columns);
+  return detail;
+}
+
+function renderHistory() {
+  const host = el("history-list");
+  if (!host) return;
+  host.textContent = "";
+  const runs = historyRuns.slice().sort((a, b) => b.id - a.id);
+  if (!runs.length) {
+    const empty = make("div", "history-empty");
+    empty.append(make("div", "history-empty-headline", "No runs yet"),
+      make("div", "history-empty-sub", "Finish a run and it shows up here."));
+    host.append(empty);
+    return;
+  }
+  for (const run of runs) host.append(runCard(run));
+}
+
+function applyHistory(h) {
+  historyRuns = h && Array.isArray(h.runs) ? h.runs : [];
+  historySkipped = h && typeof h.skipped === "number" ? h.skipped : 0;
+  renderHistory();
+  if (lastRenderedFrame) renderDiag(lastRenderedFrame);
+}
+
+function setView(next) {
+  view = next === "history" ? "history" : "live";
+  const history = view === "history";
+  document.body.classList.toggle("view-history", history);
+  el("history").hidden = !history;
+  el("tab-live").setAttribute("aria-selected", String(!history));
+  el("tab-history").setAttribute("aria-selected", String(history));
+  hideTip();
+}
+
+function initHistory() {
+  el("tab-live").addEventListener("click", () => setView("live"));
+  el("tab-history").addEventListener("click", () => setView("history"));
+  renderHistory();
+}
+
 // State is pushed over IPC from the sidecar; the page never touches the
 // network. Without the bridge there is no other source -- that is only
 // ever a fault, and it gets its own screen; see renderNoTransport().
@@ -948,6 +1218,7 @@ initTileDone();
 initSettings();
 initCoopConsent();
 initUpdateBar();
+initHistory();
 
 if (ELECTRON_TRANSPORT) {
   window.ravenswatch.onState((frame) => {
@@ -967,6 +1238,9 @@ if (ELECTRON_TRANSPORT) {
   }
   if (typeof window.ravenswatch.onUpdate === "function") {
     window.ravenswatch.onUpdate(applyUpdate);
+  }
+  if (typeof window.ravenswatch.onHistory === "function") {
+    window.ravenswatch.onHistory(applyHistory);
   }
 } else {
   renderNoTransport();
