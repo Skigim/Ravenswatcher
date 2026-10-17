@@ -43,6 +43,22 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.ravenswatcher.app');
 }
 
+// Per-user data (run history, decoded game assets, settings) lives in a
+// folder named after the product. Electron would name it from package.json's
+// "name", ravenswatch-live-readout, which earlier releases used: move that
+// folder over once, then point userData at the new one. Before the
+// single-instance lock, which lives in userData.
+const USER_DATA = path.join(app.getPath('appData'), 'Ravenswatcher');
+const OLD_USER_DATA = path.join(app.getPath('appData'), 'ravenswatch-live-readout');
+if (!fs.existsSync(USER_DATA) && fs.existsSync(OLD_USER_DATA)) {
+  try {
+    fs.renameSync(OLD_USER_DATA, USER_DATA);
+  } catch (err) {
+    console.error('[main] old user data not moved:', err.message);
+  }
+}
+app.setPath('userData', USER_DATA);
+
 const REPO_ROOT = path.resolve(__dirname, '..');
 
 // Two layouts, ONE path. web/ is a sibling of this file both from source and

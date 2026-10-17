@@ -1,6 +1,7 @@
 /app/node_modules/
 /build/
 /app/build/icon.ico
+/app/build/icon-local.ico
 /app/dist/
 /app/out/
 *.log
