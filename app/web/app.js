@@ -980,12 +980,18 @@ const RUN_STAT_GROUPS = [
   ]],
 ];
 
+// Hero codes whose display name differs. Scarlet's definition is Red_Update6
+// and her skins are Hero_Red_*, seen on a live run; every other code shown so
+// far is the hero's name.
+const HERO_NAMES = { Red: "Scarlet" };
+
 /** Heroes\Juliet_Update6.herodef.ot -> "Juliet"; falls back to the skin name. */
 function heroName(run) {
   const def = typeof run.hero_definition === "string" ? run.hero_definition : "";
   let code = (def.split(/[\\/]/).pop() || "").replace(/\.herodef\.ot$/i, "").replace(/_Update\d+$/i, "");
   if (!code && typeof run.hero === "string") code = run.hero.replace(/^Hero_/, "").split("_")[0];
-  return code ? code.replace(/_/g, " ") : "Unknown hero";
+  if (!code) return "Unknown hero";
+  return HERO_NAMES[code] || code.replace(/_/g, " ");
 }
 
 function difficultyName(d) {

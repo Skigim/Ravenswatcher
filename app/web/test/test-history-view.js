@@ -36,7 +36,7 @@ const STATS = {
 };
 const SCARLET = {
   v: 1, id: Date.UTC(2026, 9, 17, 4, 21, 24), ended: '2026-10-17T04:21:24.000Z', result: 'defeat',
-  hero: 'Hero_Scarlet_Default', hero_definition: 'Heroes\\Scarlet_Update6.herodef.ot',
+  hero: 'Hero_Red_Cinder', hero_definition: 'Heroes\\Red_Update6.herodef.ot',
   difficulty: 2, map: 0, map_name: 'Dark Hills', chapter: 0, playtime_s: 716.97, level: 4.158,
   score: { total: 195, details: ['Base score: 140', 'Level: x1.24', 'Multiplayer: +10 %', 'Altar of Heroes : +5%'] },
   talents: [
