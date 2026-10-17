@@ -16,7 +16,7 @@
      they are ignored in a <meta> policy and only earn a console warning. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' asset:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ravenswatcher — live run readout</title>
+<title>Ravenswatcher</title>
 <link rel="icon" href="asset://icons/icon_level.png">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -30,6 +30,13 @@
       <div class="kicker">Live run readout</div>
     </div>
     <div class="head-cluster">
+      <!-- The two views. app.js swaps them with .view-history on <body>; the
+           live readout keeps painting underneath, so switching back shows the
+           current frame rather than waiting for the next. -->
+      <div class="tabs" role="tablist" aria-label="View">
+        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="live-view">Live</button>
+        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history">History</button>
+      </div>
       <div class="head-right" id="head-right"></div>
       <!-- Same box as the gear, but a link: it leaves the window for the
            public issues page, and main.js lets it out only because github.com
@@ -54,14 +61,6 @@
       </button>
     </div>
   </header>
-
-  <!-- The two views. app.js swaps them with .view-history on <body>; the
-       live readout keeps painting underneath, so switching back shows the
-       current frame rather than waiting for the next. -->
-  <nav class="tabs" role="tablist" aria-label="View">
-    <button class="tab" id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="live-view">Live</button>
-    <button class="tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history">History</button>
-  </nav>
 
   <!-- Shown by applyUpdate() when the launch check found a newer release
        and the player has neither skipped that version nor dismissed the bar

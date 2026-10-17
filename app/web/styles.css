@@ -1029,21 +1029,18 @@ body {
 }
 
 /* — view tabs — */
-/* A slim strip under the header, so the header itself stays the brand and
-   its controls. The selected view is underlined in the accent. */
-.tabs {
-  height: 30px;
-  flex: none;
-  display: flex;
-  gap: 24px;
-  padding: 0 var(--pad);
-}
+/* Square, bordered, the gear's height: they sit in the same cluster and read
+   as the same family of control. The selected tab takes the gear's open
+   state, so "which view am I in" uses the one emphasis the header has. */
+.tabs { display: flex; gap: 2px; }
 .tab {
   all: unset;
   cursor: pointer;
+  height: 34px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
-  border-bottom: 2px solid transparent;
+  border: 1px solid var(--divider);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1051,10 +1048,11 @@ body {
   color: var(--neutral-500);
 }
 .tab:hover { color: var(--neutral-100); }
-.tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+.tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
 .tab[aria-selected="true"] {
-  border-bottom-color: var(--accent-500);
-  color: var(--neutral-100);
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
 }
 
 /* — run history — */
