@@ -4,14 +4,22 @@ This plan adds run history to Ravenswatcher: when a run ends, the overlay
 records what the victory or defeat summary showed, keeps it across runs and
 app updates, and lets the player look back over past runs.
 
-It's a plan, not the feature. The evidence comes from three live defeats on
-October 15, 2026, each matched against screenshots of the summary pages:
+It's a plan, not the feature. The evidence comes from three solo defeats on
+October 15, 2026, and a two-player defeat on October 16, each matched against
+the summary screen and player-supplied build details:
 
 | Run | Hero | Difficulty | Playtime | Level reached | Damage dealt | Score |
 |---|---|---|---|---|---|---|
 | 1 | Kintaro | Twilight | 04:26 | 3.06 | 9,072 | 122 |
 | 2 | Juliet | Adventure | 18:11 | 6.52 | 55,038 | 196 |
 | 3 | Kintaro | Nightmare | 04:57 | 2.71 | 11,134 | 139 |
+| 4 | Kintaro | Darkness | 20:01 | 5.26 | 39,694 | 258 |
+
+A fifth capture, Scarlet on October 16, read a different score (195), four
+score details and four selected talents. The player confirmed Legendary=3
+for Devourer in reply to the score/build confirmation request. That capture
+also exposed stale previous-run score data at the defeat flag; see the
+freshness check below.
 
 The probes are `app/reader/bench/run-end-watch.js` (phase flags, every
 GlobalValue, and instance dumps across the transition) and
@@ -23,10 +31,11 @@ at). The confirmed method is recorded in `live_memory_reading.md` under
 
 The game keeps one record of the current run, an `oCDtCurrentRunProfileData`
 embedded in the game profile (`oCDtGameProfile`). The score data shown on the
-summary (`HeroScoreData`) is embedded in that record at `+0xD8`. There is one
-instance of each, found by vtable with the same RTTI walk the melody and shop
-channels use. The record exists from the main menu onward and keeps its
-address for the session.
+summary (`HeroScoreData`) is embedded in that record at `+0xD8`. The profile
+has one embedded pair, found by the same RTTI walk the melody and shop
+channels use. Run 4 also had a second `HeroScoreData` instance for co-op;
+the embedded profile matched the local player. The record exists from the
+main menu onward and keeps its address for the session.
 
 Offsets in the following tables are from the start of the record. Status
 means:
@@ -47,11 +56,11 @@ means:
 | Hero definition | first string in the `+0x70` buffer | string | Matched once | `Heroes\Juliet_Update6.herodef.ot` in run 2 |
 | Playtime, seconds | `+0x9C` | float | Confirmed | 266.5 (04:26), 1091.9 (18:11), 297.1 (04:57) |
 | Level reached | `+0xA0` | float | Confirmed | 3.0639, 6.52, 2.71 |
-| Difficulty | GlobalValue `Game Difficulty` | int | Confirmed | 1 on Twilight, 3 on Nightmare; Adventure wasn't logged |
-| Chapter reached | GlobalValue `Current chapter` | int | Matched once | 0 when run 1 died in chapter I |
+| Difficulty | GlobalValue `Game Difficulty` | int | Confirmed | 1 on Twilight, 2 on Darkness, 3 on Nightmare; Adventure wasn't logged |
+| Chapter reached | GlobalValue `Current chapter` | int | Confirmed for chapter I | 0 when runs 1 and 4 died in chapter I; later chapters taken to count up |
 | Map | GlobalValue `Current map id`, last value before `-1` | int | Confirmed | The reader already tracks it; it reads `-1` on the summary |
-| Total score | not located | — | Not found | Not in the record or the score page controller; see "Open risks" |
-| Score details | not located | — | Not found | Three, five, and two icons across the runs |
+| Total score | score page entity, named `Score Label` component; see method | numeric UTF-8 text, independently matched to int cache | Matched once | 258 in run 4, read by fresh RTTI discovery without supplying the score |
+| Score details | score controller `+0x1F8` vector, stride `0x20`, text at entry `+0x08` | UTF-8 strings plus icon pointers | Matched once | All five run 4 lines matched the player: base 140, level x1.44, multiplayer +10%, Grimoire +5%, Side Quest +25% |
 
 `Game Difficulty` holds through the summary, drops to 0 when the player
 presses **End**, and returns to the selected difficulty at hero select.
@@ -69,8 +78,8 @@ plus `0xD8`. The screen rounds down: 61.73 shows as 61.
 | From attack | `+0x18C` | Confirmed (4,650.4; 5,056.3) |
 | From power | `+0x190` | Confirmed (2,496.2; 2,956.4) |
 | From special | `+0x194` | Confirmed (1,926.2; 3,121.9) |
-| From defense | `+0x198` | By position |
-| From ultimate | `+0x19C` | By position |
+| From defense | `+0x198` | Matched once (3,765.81 -> 3,765) |
+| From ultimate | `+0x19C` | Matched once (1,024.87 -> 1,024) |
 | Other sources | `+0x1A0` | By position |
 | Highest single damage | `+0x1A4` | Confirmed (173.15; 156) |
 | Self healing | `+0x1A8` | Confirmed (63.58; 78.78) |
@@ -78,22 +87,22 @@ plus `0xD8`. The screen rounds down: 61.73 shows as 61.
 | Self shield | `+0x1B0` | By position |
 | Shield to allies | `+0x1B4` | By position |
 | Damage blocked | `+0x1B8` | Confirmed (61.73; 364.2) |
-| Revive assists | `+0x1BC` | By position |
+| Revive assists | `+0x1BC` | Matched once (3) |
 | Damage taken | `+0x1C0` | Confirmed (426.7; 1,519.8; 708.5) |
 | Death's doors | `+0x1C4` | Matched once (3) |
-| Raven feathers consumed | `+0x1C8` | Inferred (2 in run 3; off screen in the screenshot) |
+| Raven feathers consumed | `+0x1C8` | Matched once (3 visible in run 4) |
 | Dream shards amassed | `+0x1CC` | Matched once (228) |
-| Dream shards spent | `+0x1D0` | By position |
-| Stars of fate used | `+0x1D4` | By position |
+| Dream shards spent | `+0x1D0` | Matched once (270) |
+| Stars of fate used | `+0x1D4` | Matched once (2) |
 | Magical objects collected | `+0x1D8` | Matched once (1) |
 
 ### Behind pointers
 
 | Field | Where | Status | Evidence |
 |---|---|---|---|
-| Magical objects | `+0xE0` vector (pointer, count, capacity) of 16-byte GUIDs | Confirmed by count | 0, 5, and 1 GUIDs for 0, 5, and 1 objects |
-| Melodies | `+0x140` vector of 16-byte melody GUIDs | Inferred | Run 2: `Increase_Fountain_Effect`, `Instant_Level_Up`; run 3: `Instant_Level_Up`. Which melodies it lists isn't tied to the screen yet |
-| Talents | `+0x10` vector; 28 `oCDtEntityCpntSkillControllerPersistentData` entries with a skill GUID at entry `+0x20` and state ints at `+0x30` and `+0x50` | Not resolved | Run 3 showed two talents; four entries read `+0x50 = 1` and six read `4`. No GUID-to-name table yet |
+| Magical objects | `+0xE0` vector (pointer, count, capacity) of 16-byte GUIDs | Distinct-type count matched | Run 4 has five GUIDs for five distinct types and seven objects; `+0xF0` begins with uint16 counts 1,3,1,1,1, a candidate parallel quantity vector, still needing GUID/order validation |
+| Melodies | `+0x140` vector of 16-byte melody GUIDs | Inferred | Run 2: `Increase_Fountain_Effect`, `Instant_Level_Up`; run 3: `Instant_Level_Up`. Run 4 has one GUID despite no melodies unlocked; this must not be treated as the unlocked-melody list |
+| Talents | `+0x10` persistent components → hero-controller persistent entry `+0xE8` selected GUID vector; join skill GUID `+0x20` to rarity `+0x50` and loaded settings/names | Matched once | Run 4: all five names and rarities match, in screen order; fresh discovery succeeded again with Statistics closed. See "Run talents" in `live_memory_reading.md` |
 | Hero build stats (vitality, damage, and so on) | not in the record | — | Per-entity component values ("Hero build stats" in `live_memory_reading.md`); the reader doesn't read them |
 
 ## Trigger
@@ -103,8 +112,9 @@ from 0 to 1. In run 1 the defeat flag and `Current map id` → `-1` changed in
 the same 500 ms poll. The flag is the better signal: `-1` also appears between
 any two runs and doesn't say how the run ended.
 
-The data is complete on arrival. The first read after the flag (0.7 s in run
-2, 2.9 s in run 1) already held every value the screen showed, and later reads
+The run-record data is complete on arrival. This does not establish the
+readiness of the separately located score UI. The first record read after the flag (0.7 s in run 2, 2.9 s in run 1)
+already held every matched record value, and later reads
 at +1, +5, and +15 s were identical.
 
 The window closes when the player presses **End**. The flags drop to 0 and
@@ -133,7 +143,19 @@ still reads only on the flag, because the summary is the complete set.
 4. Add the map id, difficulty, chapter, and final melody states from the
    reader's last in-run frame. These come from channels that already
    exist, captured just before the flag.
-5. Emit the summary through one new key, `run_summary`, which is `null` on
+5. Read total score and detail lines from the score UI by the method in
+   `live_memory_reading.md` under "Run score and score details." On the
+   edge, hold the score controller's detail buffer pointer (`+0x1F8`) as a
+   baseline. Poll until the pointer moves and the label and int cache
+   agree, then read score once, before End. Run 5 kept the previous run's
+   score for over 25 seconds, and the buffer moved when the current score
+   arrived. If End comes first, emit the summary with `score: null`.
+6. Read selected talent GUIDs from the hero persistent entry's `+0xE8`
+   vector, join to persistent rarity and resolve names from loaded
+   definitions/listeners by "Run talents" in `live_memory_reading.md`.
+   Rarity codes 0–4 are Common, Rare, Epic, Legendary and Ultimate; keep
+   any other code as a raw value. Reject missing or ambiguous names.
+7. Emit the summary through one new key, `run_summary`, which is `null` on
    every frame except the one carrying a capture. This keeps the fixed key
    count that `test-stdio` asserts. The summary carries a capture id (the wall
    clock time of the edge) so the main process can drop a duplicate.
@@ -189,37 +211,29 @@ or capture ids.
 
 ## Open risks and live checks
 
-1. **Total score and score details (required, not found).** Neither is
-   in the record. The score page controller
-   (`EntityCpntBookScoreUiController`) has no field holding the score in its
-   first 0x800 bytes, and its one candidate vector reads count 2 in every
-   run and mid-run, so it isn't the detail list. Next: while the summary is
-   up, search writable memory for the displayed score as an int and a
-   float, and name the object around each hit. That probe needs the score
-   typed in by the player, so it costs one more run with a pause on the
-   summary.
-2. **Talents (required, not resolved).** Run 3 showed two talents. Of the
-   28 skill entries, four read `+0x50 = 1` and six read `4`, so neither
-   field alone marks a taken talent. The skill GUIDs also have no name
-   table: the decoded hero definitions predate Kintaro and don't contain
-   these GUIDs. Next: one run with a hero in the decoded set, where the
-   talents are hovered, to tie GUIDs to names and test which state marks a
-   taken talent.
+1. **Score readiness.** The detail buffer pointer moved once, in one run
+   (Kintaro's buffer to Scarlet's). The first run of a game session, with no
+   earlier score page, hasn't been observed.
+2. **Talents.** Selection, names and rarity work for Kintaro and Scarlet.
+   Rare=1 comes from the player, not a screen match. Delegated names are
+   taken as available at the flag.
 3. **Victory.** Taken as given from the flags. A run that ends with neither
    flag rising is not recorded.
-4. **Magical object names.** The GUIDs need a GUID-to-definition table. The
-   app's item tables are keyed by definition name, so this needs the GUID
-   from each cooked definition.
-5. **Difficulty and chapter numbering.** Difficulty reads 1 for Twilight
-   and 3 for Nightmare; Adventure wasn't logged. Chapter has one data point.
-   Check: a death in chapter II or III with `run-end-watch.js` running.
-6. **Fields by position.** Twelve statistics rows have only ever read zero
-   where the screen showed zero. A run that uses dash damage, the trait,
-   defense, ultimate, shields, or the Sandman confirms them.
-7. **Multiplayer.** All three runs were solo. The summary has four player cards,
-   and `HeroScoreData` is synced per player (`oCDtNetMsgSyncHeroScoreData`).
-   With more players there may be more than one score instance, and the local
-   player's has to be picked.
+4. **Magical object names.** The app has item tables, keyed by definition
+   name. How the record's GUIDs map to those names isn't known yet.
+5. **Difficulty and chapter numbering.** Difficulty reads 1 for Twilight,
+   2 for Darkness, and 3 for Nightmare; Adventure wasn't logged. Chapters
+   are taken to count up from 0 for chapter I.
+6. **Fields by position.** Six rows still have only read zero: dash,
+   trait, other damage, healing to allies, self shield, and shield to allies.
+   Run 4 supplied nonzero screen matches for defense, ultimate, revive
+   assists, shard spending, Stars of Fate, and feathers. Next: use the six
+   remaining sources and match their statistics rows.
+7. **Multiplayer.** Run 4 had two players and two `HeroScoreData`
+   instances. All 23 statistics in the current-run profile's embedded score
+   matched the local player's screen (39,694 damage versus the other
+   player's 39,619). This validates that profile in one co-op run, not an
+   arbitrary first-instance rule for player score objects.
 9. **Game patches.** The offsets are a layout, and the October 12, 2026 update
    already moved a hero-controller field. A capture whose playtime or level
    reads outside a sane range (0 to 14,400 s, 1 to 99) is dropped and reported,

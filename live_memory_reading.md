@@ -730,7 +730,9 @@ under "Hero build stats". The stats are not part of the readout.
 The victory and defeat summary reads from one record the game keeps for the
 current run: an `oCDtCurrentRunProfileData` embedded in the game profile
 (`oCDtGameProfile`). The summary's score data, `HeroScoreData`, is embedded
-in the record at `+0xD8`. There is one instance of each. Find the record
+in the record at `+0xD8`. The three solo runs had one instance of each. In the
+October 16 two-player run there were two `HeroScoreData` instances; the
+current-run profile's embedded score matched all 23 local-player statistics. Find the record
 with `rtti.resolveAllVtableRvas` and `scanPointers`, like any other class.
 It exists from the main menu onward and keeps its address for the session.
 It's live during play: level reached and the statistics rows rise through
@@ -769,6 +771,179 @@ the record. `run_history_plan.md` lists every row and how each was
 confirmed. `bench/run-record-walk.js` walks the record and its vectors;
 `bench/run-end-watch.js` logs the flags, every GlobalValue, and the score
 classes across the transition.
+
+### Run score and score details
+
+Located on October 16, 2026, in a two-player Darkness defeat. A fresh RTTI
+discovery read total **258** and every score-detail line without being given
+the displayed score or any session address. A separate int cache also read
+258. This is a location established on **one run**, not cross-run or
+first-poll timing validation.
+
+Start at `EntityCpntBookScoreUiController@dt@oe@@`, found by RTTI. Its
+`+0x08` points to the owning `oCEntity`, whose settings at entity `+0x28`
+have the internal name `Score_Book_Page` (string at settings `+0x08`).
+
+**Total score:** the entity's component-pointer vector is at `+0x190`
+(pointer, int32 count, int32 capacity). Among those components, locate
+`oCEntityCpntLabelUi` named **Score Label**: component `+0x10` points to
+settings, whose `+0xE8` is the internal name string. Label component
+`+0x170` points to
+`DynamicCpntValueListenerData<oCTStr<char>>`; listener `+0x08` holds the
+UTF-8 string header. It read `258`. Read the displayed value directly;
+there is no need to derive it from rounded multipliers.
+
+**Independent numeric check:** in the same entity, find
+`oCEntityCpntValueOperations` named **Score Display Operation** by the same
+settings-name path. Its input vector at `+0x68` has stride `0x18`. Each
+entry's `+0x08` is a listener pointer; the
+`DynamicCpntValueListenerData<int>` input stores its int32 at listener
+`+0x08`. That input also read 258. A disagreement with the displayed label
+is a reason to reject or defer the read, not substitute zero.
+
+**Details:** controller `+0x1F8` is a vector header (pointer, int32 count,
+int32 capacity), stride `0x20`. An entry contains an icon texture pointer
+at `+0x00` and its UTF-8 detail string header at `+0x08`. Run 4 had five:
+
+- `Base score: 140`
+- `Level: x1.44`
+- `Multiplayer: +10 %` (the live string uses a nonbreaking space)
+- `Grimoire : +5%`
+- `Side Quest : +25%`
+
+The string headers above contain a data pointer at `+0x00`, byte length at
+`+0x08` (mask the high flag bit), and capacity at `+0x0C`. Read the stated
+byte length as UTF-8, not as UTF-16 or one-byte ASCII. Detail labels are
+localized display text; a stable language-independent detail schema is
+not established by these strings.
+
+The count-two vector examined previously is a different controller field.
+Its count did not rule out this five-entry detail list. Likewise, absence
+of a scalar total in the controller's first `0x800` bytes does not rule out
+values behind the owning entity's components.
+
+Reproduction remains private: run `node tools/probe_run_score.js` from the
+sibling Ravenswatch checkout's `datamining/` directory while a summary is
+active. It discovers by RTTI and internal component names, reads the total
+and details, and checks the integer cache. Synthetic fixtures cover varied
+scores including zero, UTF-8 detail strings, disagreeing caches and invalid
+vectors. The production reader does not yet include this channel.
+
+Victory and localization behavior are untested. The second-run timing
+result below disproves readiness at the defeat edge and gives the
+readiness signal. The run-record readiness measurement above does not
+establish readiness of this separate UI data. The displayed
+factors are consistent with rounding `140 * (1.44 + .10 + .05 + .25)` to
+258; this is not a proven reconstruction of the game's internal formula.
+
+**Second-run timing check (Scarlet, October 16):** the immediate read at
++1 ms from detected defeat returned the previous run's 258 and all five
+previous detail lines. Label and int cache agreed. That stale result was
+still present at +25.657 s. At +27.845 s the caches disagreed and the read
+was rejected; the first sampled current result was 195 at +29.689 s, with
+four lines: base 140, level x1.24, multiplayer +10%, Altar of Heroes +5%.
+The player responded positively to the score/build confirmation request.
+The same score path therefore works for a second total and detail count,
+but first-edge readiness is disproven. An unchanged address, repeated
+stable values and cache agreement all fail to establish freshness.
+
+**Readiness signal: the detail buffer pointer.** The controller, entity,
+label component and listeners kept their addresses across both runs. The
+detail vector's buffer pointer, the first field of the header at controller
+`+0x1F8`, did not:
+
+| Read | Since detected defeat | Total | Details | Detail buffer |
+|---|---|---|---|---|
+| Kintaro, final read | — | 258 | 5 | `0x25A8E90ABF0` |
+| Scarlet, stale | +1 ms to +25.657 s | 258 | 5 | `0x25A8E90ABF0` |
+| Scarlet, rejected | +27.845 s | — | — | — |
+| Scarlet, current | +29.689 s onward | 195 | 4 | `0x25AA86173C0` |
+
+The game rebuilds the detail vector when it fills the current run's
+score, so the buffer moves at the same moment the total changes. To
+capture score:
+
+1. On the flag's rising edge, read the run record and hold the detail
+   buffer pointer as the baseline.
+2. Poll the score page until the buffer pointer differs from the baseline
+   and the label and int cache agree.
+3. Read the total and details once, before **End**.
+
+This works when two runs score the same, because the buffer still moves.
+It needs no fixed delay. On the first run of a game session, no previous
+score page exists, so the baseline is expected to be null or an empty
+vector; that case has not been observed. The signal rests on one observed
+transition.
+
+### Run talents
+
+Located on October 16, 2026, in the same two-player Kintaro defeat as the
+score method above. Fresh discovery read all five selected talents in
+screen order, including localized names and the screen's rarities. It was
+given no selected GUIDs, names, rarities, or session addresses. Both score
+and talent probes succeeded again after the player closed Statistics and
+returned to Score. This validates operation after closing Statistics.
+
+**Selected list:** start at `oCDtCurrentRunProfileData`. Its `+0x10` vector
+contains pointers to persistent components. Find the one
+`oCDtEntityCpntHeroControllerPersistentData`. That entry's **`+0xE8`** is a
+vector header (pointer, int32 count, int32 capacity) of **16-byte selected
+skill GUIDs**. It held five in screen order. Join these to the same record's
+`oCDtEntityCpntSkillControllerPersistentData` entries by GUID at `+0x20`.
+The int32 at skill persistent entry **`+0x50` is rarity**, not selection:
+selected Common talents read zero. Codes are Common=0, Rare=1, Epic=2,
+Legendary=3, Ultimate=4; retain any other code without inventing a label.
+
+**Definition and ordinary name:** discover loaded
+`oCDtEntityCpntSkillControllerSettings` objects by RTTI, accepting primary
+objects whose `+0x18` points to themselves. Join their GUID at `+0x88` to
+the selected GUID. Filter by owning entity settings at `+0x48`, whose name
+at `+0x08` matches the current hero (for example `Hero_Kintaro`, from the
+record's hero-definition path at `+0x70`). Do not confuse a secondary
+vtable match or another hero's skill with the selected definition.
+
+Settings `+0x180` embeds the name picker. Picker `+0x68` points to its
+payload: `+0x40` is the `oCLocalText` table pointer, `+0x50` the int32 key
+index, and `+0x58` the UTF-8 key header. The table's key vector is at
+`+0x80`, its current display-string vector at `+0xA0`, both stride `0x10`.
+Verify the index against the key; if stale, require a unique matching key
+before reading the same display-string index. This returned Unchained
+Beast, Deafening Cry, Leaping Dash, and Frenzy. The raw/starred text vector
+at `+0x90` is not the current display-string vector.
+
+**Delegated name:** Rikishi's picker did not supply the localized payload
+above. Find runtime `oCDtEntityCpntSkillController` objects whose settings
+pointer at `+0x10` equals the selected settings. Runtime `+0xA8` points to a
+`DynamicCpntValueListenerData<oCTStr<char>>`; its UTF-8 text header at
+listener `+0x08` yielded Rikishi. Require the available matching listeners
+to agree on one nonempty name. Missing or ambiguous names are failed or
+deferred reads, not silently omitted talents.
+
+The five joined rarities were Epic, Common, Common, Common, Ultimate
+(2,0,0,0,4), independently matching Statistics' bound skill viewers.
+Selection comes from the persistent GUID list, not UI subscription counts.
+No decoded hero catalogue is needed for this method.
+
+Reproduction remains private: run `node tools/probe_run_talents.js` from
+the sibling Ravenswatch checkout's `datamining/` directory while a summary
+is active. Synthetic fixtures cover selected order, unchosen Common
+skills, zero versus missing rarity, UTF-8 names, delegated names, empty
+selection, unknown rarity, stale key indices, duplicate selections and
+malformed state. The production reader does not yet include this channel.
+
+**Second-hero check (Scarlet, October 16):** the first attempt at +1 ms
+from detected defeat returned Devourer (code 3), Explosive Rush (0), Energy
+(0), and Fan of Spikes (0). Selection, names and codes stayed unchanged
+through the capture. The player explicitly confirmed Devourer's displayed
+rarity as **Legendary**, establishing **Legendary=3**. All four names used
+loaded localization, so this does not test the delegated-name fallback.
+First reads preceded the request to open Statistics for confirmation;
+direct UI visibility telemetry was not captured.
+
+Rare=1 is the player's statement of the game's rarity order, not a screen
+match. Delegated names are taken as available at the flag, like the
+ordinary names Scarlet's capture read on the first attempt. Victory is
+untested.
 
 ## Live readout
 
