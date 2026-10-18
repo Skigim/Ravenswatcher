@@ -94,8 +94,8 @@ ship.
 
 Three measured constraints govern the scan and the FFI layer: `koffi.view()`
 is fatal under Electron, the sweep must stay on a worker thread, and the scan
-loop must not touch BigInt. Each carries its measurement in the traps list in
-`engineering_constraints.md`. The fourth is specific to this reader:
+loop must not touch BigInt. The tests cover these constraints. The fourth is
+specific to this reader:
 
 **The placement scan is the expensive thing, and it is triggered by an
 observed transition, not a timer.** `placedAmong()` sweeps writable memory
@@ -144,7 +144,7 @@ synthetic tests exercise parsing, malformed records, and partial-tree merge.
 
 ## Traps checked against the port
 
-From `engineering_constraints.md`, "Traps already paid for":
+The regression tests cover these reader-specific constraints:
 
 - **Map ids start at 0.** Nothing hardcodes an id; `sweeper.js` reads the
   `"<Map name> map id"` constants out of the index the way

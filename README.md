@@ -78,7 +78,7 @@ It decodes icons and item descriptions from that install at runtime.
 
 The source is in `app/`: `reader/` reads game memory, `assets/` decodes local
 resources, and `web/` renders the readout. See [CONTRIBUTING.md](CONTRIBUTING.md)
-and [engineering_constraints.md](engineering_constraints.md).
+and the [reader README](app/reader/README.md).
 
 ## License
 
