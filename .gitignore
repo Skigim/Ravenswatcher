@@ -1,0 +1,64 @@
+/app/node_modules/
+/build/
+/app/build/icon.ico
+/app/build/icon-local.ico
+/app/dist/
+/app/out/
+*.log
+.env
+.env.*
+# Runtime game resources and private reference exports never belong in Git.
+/app/web/assets/*.png
+/app/web/item-text.js
+/app/web/item-icons.js
+/game-assets/
+*.dmp
+# TypeScript build output, emitted beside its source (see app/tsconfig.json for
+# why there is no outDir). One entry per converted module: an unconverted
+# sibling .js is still real source and must stay tracked, so this cannot be
+# globbed until the port is finished.
+/app/reader/pe.js
+/app/reader/pe.js.map
+/app/reader/pe.d.ts
+/app/reader/values.js
+/app/reader/values.js.map
+/app/reader/values.d.ts
+/app/reader/state.js
+/app/reader/state.js.map
+/app/reader/state.d.ts
+/app/reader/melodies.js
+/app/reader/melodies.js.map
+/app/reader/melodies.d.ts
+/app/reader/sandman.js
+/app/reader/sandman.js.map
+/app/reader/sandman.d.ts
+/app/reader/sandman-worker.js
+/app/reader/sandman-worker.js.map
+/app/reader/sandman-worker.d.ts
+/app/reader/tiles.js
+/app/reader/tiles.js.map
+/app/reader/tiles.d.ts
+/app/reader/tiles-worker.js
+/app/reader/tiles-worker.js.map
+/app/reader/tiles-worker.d.ts
+/app/reader/runs.js
+/app/reader/runs.js.map
+/app/reader/runs.d.ts
+/app/reader/runs-worker.js
+/app/reader/runs-worker.js.map
+/app/reader/runs-worker.d.ts
+/app/reader/worker-control.js
+/app/reader/worker-control.js.map
+/app/reader/worker-control.d.ts
+/app/history.js
+/app/history.js.map
+/app/history.d.ts
+
+# app/assets is TypeScript throughout, so its compiled output can be globbed.
+/app/assets/*.js
+/app/assets/*.js.map
+/app/assets/*.d.ts
+
+/app/share.js
+/app/share.js.map
+/app/share.d.ts

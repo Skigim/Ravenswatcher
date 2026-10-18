@@ -1,0 +1,1407 @@
+/* Ravenswatcher live readout.
+   Tokens are the Modernist design system's ramps, mapped onto the dark ground
+   the readout uses: every colour below is a step from that system rather than
+   a one-off hex, so retuning the ramp retunes the page. Radii stay 0 and the
+   only separator is a 2px rule -- the system has no shadows or rounding. */
+
+/* Vendored, not pulled from Google Fonts: the page loads nothing from the
+   network. See assets/fonts/SOURCES.tsv for where the file came from and
+   assets/fonts/OFL.txt for its license. It's a variable font (single file
+   covering weight 400-800), matching what Google Fonts itself served for
+   this same weight list to a variable-font-capable UA -- the CSS below still
+   requests discrete weights (400/500/600/700/800) via var(--font); the
+   engine interpolates each from the one file's wght axis. */
+@import url("typography.css");
+
+:root {
+  --neutral-100: #f8f4f4;
+  --neutral-400: #bab6b6;
+  --neutral-500: #9b9797;
+  --neutral-600: #7d7979;
+  --neutral-700: #605d5d;
+
+  --accent-400: #ff9783;
+  --accent-500: #ff563c;
+  --accent-2-600: #c94b39;
+  --accent-2-800: #71261b;
+
+  /* The green step. The palette had a green BACKGROUND on the completed
+     melody badge but never named a foreground for it, and
+     .melody-state-completed reached for an undeclared --accent-2-400. An
+     undefined custom property with no fallback makes the whole declaration
+     invalid at computed-value time, so that badge inherited neutral-100
+     instead of reading green. The shop reuses these for "you can afford it". */
+  --positive-400: #4ade80;
+  --positive-500: #22c55e;
+  --positive-tint: rgba(34, 197, 94, 0.12);
+
+  --page: #0e0d0d;
+  --ground: #131212;
+  --surface: #1b1a1a;
+  --surface-hover: #242222;
+  --divider: #423f3f;
+
+  /* Two roles over that one colour, because a seam disappears only when it
+     is painted whatever sits on either side of it. The 2px gaps inside a box
+     group have --surface on both sides; the rules bounding the header and
+     the footer have --ground on one. A single token cannot serve both -- set
+     it all to --surface and the head/foot rules turn into light lines, set it
+     all to --ground and the box gaps merely change colour.
+     Controls (the status pill, the settings switch) keep
+     --divider directly: they are edges of a thing, not seams between things,
+     and must stay visible when the seams go. */
+  --seam: var(--divider);
+  --band: var(--divider);
+
+  --font: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --head-h: 82px;
+  --kpi-h: 140px;
+  --diag-h: 40px;
+  --pad: 22px;
+  --pad-lg: 26px;
+}
+
+/* One preference applies to both the readout and History, including tooltips. */
+.stylized-fonts { --font: "Alegreya Sans", Archivo, system-ui, sans-serif; }
+.stylized-fonts :is(.brand, .kicker, .tab, .run-outcome, .run-detail-tab, .run-detail-total, .settings-label, .curtain-headline, .tip-name) {
+  font-family: "Germania One", var(--font);
+  font-weight: 400;
+}
+
+/* Seams off. Geometry is untouched on purpose: every gap keeps its 2px and
+   every rule keeps its height, so not one box moves -- only the paint under
+   them changes to match its neighbours. Collapsing them (gap: 0, display:
+   none) would reflow the whole page, which is exactly what this must not do.
+   Set on <body> by app.js before the first paint. */
+.seamless {
+  --seam: var(--surface);
+  --band: var(--ground);
+}
+
+* { box-sizing: border-box; }
+
+
+/* Keep scrolling controls on the same dark palette as the panels. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: var(--ground); }
+::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  background: var(--neutral-700);
+  border: 2px solid var(--ground);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--neutral-600); }
+::-webkit-scrollbar-thumb:active { background-color: var(--neutral-500); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--neutral-100);
+  font-family: var(--font);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The design is a 1280x800 artboard. Filling the viewport instead of pinning
+   those numbers keeps it usable on a second monitor; the fixed band heights
+   and the type scale are the design and don't scale with it. */
+.shell {
+  width: 100vw;
+  height: 100vh;
+  min-width: 960px;
+  min-height: 620px;
+  background: var(--ground);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rule { height: 2px; flex: none; background: var(--band); }
+/* The one rule with a surface region on both sides (the KPI row above, the
+   body below), so it fills with --seam rather than --band. */
+.rule-seam { background: var(--seam); }
+
+.kicker {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--neutral-500);
+  text-transform: uppercase;
+}
+.kicker-row { display: flex; align-items: center; gap: 7px; }
+
+/* Marks a value the readout has a place for but no decoded address yet. */
+.badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent-2-600);
+  border: 1px solid var(--accent-2-800);
+  padding: 1px 4px;
+  text-transform: uppercase;
+}
+
+/* — header — */
+.head {
+  height: var(--head-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--pad);
+  gap: 24px;
+}
+.brand { display: flex; align-items: baseline; gap: 14px; }
+.wordmark {
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.brand-rule { width: 2px; height: 22px; background: var(--divider); }
+.head .kicker { letter-spacing: 0.16em; }
+
+.head-right { display: flex; align-items: center; gap: 2px; }
+
+/* A quiet connection dot. Names and failure details live in its tooltip. */
+.status { display: grid; place-items: center; width: 28px; height: 36px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-600); }
+.status-live .status-dot { background: var(--positive-500); }
+.status[data-connection="stale"] .status-dot { background: var(--accent-400); }
+.status[data-connection="error"] .status-dot { background: var(--accent-500); }
+.status:focus-visible { outline: 1px solid var(--neutral-500); outline-offset: 2px; }
+
+/* — settings — */
+/* The gear sits beside the status pill in a wrapper, not as a third child of
+   .head: that header is justify-content: space-between, so a third child
+   would be spread to the centre instead of joining the right-hand cluster.
+   The wrapper also keeps the gear outside #head-right, whose innerHTML
+   renderHead() and renderSidecarDown() both replace wholesale. */
+.head-cluster { display: flex; align-items: center; gap: 10px; }
+
+.gear {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--divider);
+  color: var(--neutral-500);
+}
+.gear:hover { color: var(--neutral-100); }
+.gear:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+.gear[aria-expanded="true"] {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
+}
+/* currentColor, so the states above are the only place the mark's colour is
+   decided. Inline SVG rather than a PNG: assets/ has no gear, and a glyph
+   would fall out of the vendored Archivo subset to whatever the system has. */
+.gear svg { display: block; width: 17px; height: 17px; }
+
+/* Anchored under the header rule, aligned to the same right padding the
+   header uses. position: fixed, so opening it moves nothing on the page --
+   and it sits outside .shell in the markup, which keeps it clear of that
+   element's overflow: hidden. */
+.settings {
+  position: fixed;
+  top: calc(var(--head-h) + 2px);
+  right: var(--pad);
+  width: 320px;
+  background: var(--surface);
+  border: 2px solid var(--divider);
+  z-index: 2;
+}
+/* A full-viewport click catcher, deliberately transparent: this is a small
+   settings menu, not a modal, so dimming the readout behind it would be
+   louder than the thing it opens for. Under the panel in z-order. */
+.settings-scrim { position: fixed; inset: 0; z-index: 1; }
+/* [hidden] is a UA rule and loses to the class selectors above, which set
+   position and display; restate it here or the panel never hides. */
+.settings[hidden], .settings-scrim[hidden] { display: none; }
+
+.coop-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 660px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 2px solid var(--divider);
+  z-index: 2;
+}
+.coop-dialog[hidden] { display: none; }
+.coop-head .kicker { font-size: 13px; }
+
+.coop-head {
+  padding: 16px var(--pad-lg);
+  border-bottom: 2px solid var(--divider);
+}
+
+.coop-body {
+  padding: 22px var(--pad-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.coop-body p {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--neutral-400);
+}
+
+.coop-actions {
+  padding: 16px var(--pad-lg);
+  border-top: 2px solid var(--divider);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.coop-btn {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  padding: 12px 24px;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  color: var(--neutral-400);
+  text-align: center;
+}
+.coop-btn:hover {
+  color: var(--neutral-100);
+  border-color: var(--neutral-500);
+}
+.coop-btn:focus-visible {
+  outline: 2px solid var(--accent-400);
+  outline-offset: -2px;
+}
+.coop-btn-primary {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
+  font-weight: 800;
+}
+.coop-btn-primary:hover {
+  background: var(--accent-400);
+  border-color: var(--accent-400);
+  color: var(--ground);
+}
+
+/* Update bar: under the header, above the first rule band. */
+.update-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px var(--pad);
+  border-top: 2px solid var(--divider);
+  background: var(--surface);
+}
+/* Same story as .settings[hidden]: the class sets display, so [hidden] has
+   to be restated or the bar draws with no text in it. .coffee is reused for
+   the version row's link and needs the same. */
+.update-bar[hidden], .coffee[hidden] { display: none; }
+.update-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-400);
+}
+.update-btn {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--divider);
+  color: var(--neutral-400);
+  text-align: center;
+}
+.update-btn:hover { color: var(--neutral-100); border-color: var(--neutral-500); }
+.update-btn:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+.update-btn-primary {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
+  font-weight: 800;
+}
+.update-btn-primary:hover { background: var(--accent-400); border-color: var(--accent-400); color: var(--ground); }
+
+.settings-head {
+  padding: 12px var(--pad);
+  border-bottom: 2px solid var(--divider);
+}
+.settings-foot {
+  padding: 12px var(--pad) 14px;
+  border-top: 2px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The coop primary button, as a link. */
+.coffee {
+  display: block;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
+  background: var(--accent-500);
+  color: var(--ground);
+}
+.coffee:hover { background: var(--accent-400); }
+.coffee:focus-visible {
+  outline: 2px solid var(--accent-400);
+  outline-offset: 2px;
+}
+.settings-row {
+  padding: 16px var(--pad);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.settings-label { font-size: 14px; font-weight: 700; }
+.settings-note { font-size: 11px; color: var(--neutral-600); margin-top: 3px; }
+
+/* Two segments. Its own background stays
+   --divider, not --seam: the switch is a control and has to keep its edge
+   when the page's seams are turned off -- which is the very setting this
+   switch controls, so it would otherwise dissolve as you used it. */
+.switch {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--divider);
+}
+.switch span {
+  padding: 6px 11px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--surface);
+  color: var(--neutral-500);
+}
+.switch[aria-checked="true"] .switch-on,
+.switch[aria-checked="false"] .switch-off {
+  background: var(--accent-500);
+  color: var(--ground);
+}
+.switch:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+
+/* The range control. Same footprint as a switch; the track is the switch's
+   --divider background and the thumb its accent segment. */
+.slider {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+.slider-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 96px;
+  height: 6px;
+  margin: 0;
+  background: var(--divider);
+  cursor: pointer;
+}
+.slider-input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 22px;
+  background: var(--accent-500);
+}
+.slider-input:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 4px; }
+.slider-value {
+  min-width: 1.4em;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — top row — */
+.kpis {
+  height: var(--kpi-h);
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: var(--seam);
+}
+.kpi {
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+.kpi-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kpi-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  opacity: 0.85;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.kpi-icon.dim { opacity: 0.22; }
+.kpi-value {
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.unresolved { color: var(--neutral-700); }
+/* The opposite of .unresolved: not "we don't know yet" but "we never will."
+   Declared after it so it still wins if both ever land on one node. Set on
+   the mark of the shop's could-not-read placeholder. */
+.fault { color: var(--accent-500); }
+
+/* — combat edge —
+   Combat state is the one in-game value worth surfacing -- not because the
+   player can't see a fight, but because they can't see when the last
+   off-screen enemy drops aggro and the teleport comes back. A tile would
+   answer that only if you looked straight at it, which is the wrong
+   instrument: peripheral vision reads a large field of moving
+   colour and does not read text at all.
+
+   So the whole app edge carries it, and costs no layout. This paints as a
+   fixed overlay above every panel, never as a border on a box: an actual
+   border would resize .shell and shift every panel by its width the moment
+   a fight started. inset box-shadow spends no space at all.
+
+   Two shadows, not one: the 3px ring is the crisp edge you see when looking
+   at the window, and the soft 26px bloom inside it is the part that carries
+   to the corner of the eye. Dropping the bloom makes this invisible at the
+   distance it exists for. */
+.combat-edge {
+  position: fixed;
+  inset: 0;
+  z-index: 3;          /* above .settings (2) -- a fight outranks the panel */
+  pointer-events: none; /* never eat a click meant for the page */
+  opacity: 0;
+  box-shadow:
+    inset 0 0 0 3px var(--accent-500),
+    inset 0 0 26px -4px var(--accent-500);
+}
+/* Only .in-combat animates. The class is absent in every other state, so the
+   overlay sits at opacity 0 and the animation is not running -- nothing to
+   pause when a run ends or the curtain drops. */
+.in-combat .combat-edge {
+  animation: combat-pulse 1.6s ease-in-out infinite;
+}
+@keyframes combat-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+
+/* — hover —
+
+   One response for every card and row that carries information: the surface
+   steps up one shade. Text colours are left alone, so a sold or short row
+   brightens without looking buyable. Placeholders (the waiting melody cards,
+   the shop's fill-the-column states, the tiles' Loading and Nothing placed
+   marks) are excluded by class or by the list mode they live in. 80 ms is
+   short enough to read as a response rather than a fade. */
+.kpi, .shop-row, .tile-cell { transition: background-color 80ms; }
+.tile-cell { background: transparent; }
+.kpi:not(.melody-card-waiting):hover,
+.shop-list:not(.shop-list-empty) .shop-row:hover,
+.tiles-list[data-mode="grid"] .tile-cell:hover {
+  background: var(--surface-hover);
+}
+
+/* — tooltip —
+
+   One element for the whole page, filled by app.js from data-tip-name and
+   data-tip-body on whatever is under the pointer. It lives outside .shell
+   for the same reason .combat-edge does: .shell clips. Above the combat ring
+   because it is transient and the ring is not. Positioned by JS; left/top
+   here are only so a first paint has numbers. */
+.tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: var(--ground);
+  border: 2px solid var(--divider);
+}
+.tip-name {
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.tip-body {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--neutral-400);
+  white-space: pre-line;
+}
+.tip-body:empty { display: none; }
+/* A pulse at the edge of vision is exactly what this setting exists to stop,
+   and the signal survives without it: the edge is still on, still red, and
+   still disappears the moment aggro drops -- which is the event being
+   reported. Held at the bright end so it is not a dim ring nobody notices. */
+@media (prefers-reduced-motion: reduce) {
+  .in-combat .combat-edge {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* — body — */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  background: var(--seam);
+}
+
+/* — placed tiles —
+   What the map generator put down this run, beside the shop. Same two-row
+   frame as .shop so the two
+   panels line up across the seam. */
+.tiles {
+  background: var(--seam);
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  gap: 2px;
+  min-width: 0;
+  /* A grid item's default min-height is its content, so without this the
+     list's natural height -- around 800px for a real roster -- pushes the
+     panel past the shell, which is overflow:hidden and simply cuts the last
+     rows off. .shop never needed it because grid-auto-rows:1fr divides a
+     fixed space between a handful of offers. Measured at 1280x800 with a
+     32-entry roster: 802px of rows into a 761px shell. */
+  min-height: 0;
+}
+.tiles-head {
+  background: var(--surface);
+  padding: 0 var(--pad-lg);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* min-height:0 is what lets the overflow actually happen inside the grid
+   row; without it the list sets the panel's height from its content and the
+   shell, which is overflow:hidden, simply cuts the overflow off. */
+.tiles-list {
+  background: var(--surface);
+  min-height: 0;
+  overflow-y: auto;
+  /* Reserve the scrollbar's column whether or not the roster overflows.
+     Container-query units are resolved before an auto scrollbar appears,
+     so without this a roster that overflows gets cells sized for the full
+     width and the last column runs 15px under the bar. Measured with a
+     20-tile roster at 5 columns: cell 107.8px against a 104.8px fit. */
+  scrollbar-gutter: stable;
+}
+/* The waiting and empty states centre one block in the panel. */
+.tiles-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: var(--pad-lg);
+  /* The populated grid sizes its cells from this box with container-query
+     units, so the box has to be a size container. Its height comes from the
+     1fr row above, not from its content, which is what a size container
+     needs -- and what the overflow-y already assumed. */
+  container-type: size;
+}
+/* Populated: --tile-cols square columns filling the width, rows scrolling.
+   The count comes from the Tiles across slider (applyTileCols in app.js);
+   the fallback here only covers a paint before initSettings runs. Width
+   alone sets the edge: a height term would pin the tile at the four-row
+   fit for every count at or under the current one and leave the slider
+   inert across half its range. */
+.tiles-list[data-mode="grid"] {
+  --tile-gap: 10px;
+  --tile-cols: 5;
+  display: grid;
+  grid-template-columns: repeat(var(--tile-cols), max-content);
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: var(--tile-gap);
+}
+.tile-cell {
+  position: relative;
+  /* cqw measures the container's content box, so the list's own padding
+     is already outside it. */
+  --tile: calc((100cqw - (var(--tile-cols) - 1) * var(--tile-gap)) / var(--tile-cols));
+  width: var(--tile);
+  height: var(--tile);
+}
+.tile-art {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* The tier ring.
+
+   The game encodes a POI's tier by drawing the icon's outline behind it in
+   green, yellow or red for tiers 1-3. The shipped outline is a single white
+   alpha silhouette -- one file, not one per colour -- so the colour has to
+   come from the page. A mask is the exact way to do that: the silhouette
+   supplies the shape and `background` supplies the colour, with none of the
+   drift a hue-rotate filter over a coloured PNG would have.
+
+   Scaled up slightly and sat behind .tile-art, so what shows is a rim around
+   the icon rather than a block under it. Hidden outright only where the game
+   ships no outline at all -- the altar, refugees, the key -- because drawing
+   a rim there would invent art the game does not have.
+
+   The fallback colour is a colour, not `transparent`. Some things ship an
+   outline but carry no tier (such as the mirror, or un-tiered POIs reading 0.0
+   in memory). Falling back to transparent drew their rings perfectly and
+   invisibly. Having an outline and having a tier are two different
+   questions -- the outline is whether the game draws a rim, the tier is only
+   what colour it takes. */
+.tile-ring {
+  position: absolute;
+  inset: 0;
+  transform: scale(1.14);
+  background: var(--tier, var(--neutral-500));
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.tile-tier-1 { --tier: var(--positive-500); }
+.tile-tier-2 { --tier: #d9a521; }
+.tile-tier-3 { --tier: var(--accent-500); }
+/* Sits on the icon rather than beside it: a count in the flow would set the
+   cell width from the digits and break the grid's rhythm. */
+.tile-count {
+  position: absolute;
+  right: -1px;
+  bottom: -2px;
+  /* Scales with the cell: 11px read fine on a 46px cell, and is lost on a
+     92px one. */
+  font-size: calc(var(--tile) * 0.22);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--neutral-100);
+  text-shadow: 0 0 3px var(--page), 0 0 3px var(--page), 0 0 2px var(--page);
+  pointer-events: none;
+}
+
+/* Done marks. A left-click on a tile takes one off its count, a right-click
+   puts it back, and at zero the cell is done: icon and ring fade and the
+   game's own check (Ui_png/Social/UI_Social_Icons_Check.png) sits over them
+   at full strength. The check is coloured art with its own outline, so it
+   is drawn as shipped rather than masked and tinted like the ring. */
+.tiles-list[data-mode="grid"] .tile-cell { cursor: pointer; }
+.tile-done .tile-art,
+.tile-done .tile-ring { opacity: 0.3; }
+.tile-check {
+  position: absolute;
+  inset: 20%;
+  background-image: url("asset://icons/tile_check.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  pointer-events: none;
+  display: none;
+}
+.tile-done .tile-check { display: block; }
+.tiles-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  width: 100%;
+}
+.tiles-waiting-mark {
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--neutral-500);
+}
+.tiles-waiting .kicker { color: var(--neutral-500); }
+
+/* — melody cards —
+   Three of the four cells in the band. The wrapper generates no box so its
+   children are grid items of .kpis directly; see index.html. */
+#melody-cards { display: contents; }
+/* .kpi is column/space-between, which pins the badge to the top of the cell
+   and the name to the bottom -- the same rhythm as the questline cell beside
+   them, whose kicker sits where these badges do. */
+/* .kpi-top is space-between, so the badge takes the left and this the right,
+   which is where the questline cell puts its icon too. */
+.melody-icon { flex: none; }
+.melody-name {
+  font-weight: 800;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.melody-state {
+  text-transform: uppercase;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 1px 4px;
+}
+.melody-state-locked,
+.melody-state-unresolved {
+  color: var(--neutral-600);
+  border-color: var(--neutral-700);
+}
+.melody-state-active {
+  color: var(--accent-400);
+  border-color: var(--accent-500);
+  background: rgba(224, 86, 36, 0.12);
+}
+.melody-state-completed {
+  color: var(--positive-400);
+  border-color: var(--positive-500);
+  background: var(--positive-tint);
+}
+.melody-row-active .melody-name {
+  color: var(--accent-400);
+}
+.melody-row-locked .melody-name,
+.melody-row-unresolved .melody-name {
+  color: var(--neutral-500);
+}
+.melody-row-completed .melody-name {
+  color: var(--neutral-100);
+}
+
+/* The shop panel before it resolves. Fills the column rather than sitting at
+   the top of it, so the space reads as deliberately empty instead of as rows
+   that failed to arrive. */
+.shop-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  width: 100%;
+  min-height: 160px;
+}
+.shop-waiting-mark {
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--neutral-500);
+}
+.shop-waiting .kicker {
+  color: var(--neutral-500);
+}
+.shop-waiting-note {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--neutral-600);
+  max-width: 34ch;
+  text-align: center;
+}
+/* The one mark that is not "not read yet". Reserved for a channel that should
+   have answered and did not. */
+.fault { color: var(--accent-500); }
+
+/* — sandman shop — */
+
+.shop {
+  background: var(--seam);
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  gap: 2px;
+  min-width: 0;
+}
+.shop-head {
+  background: var(--surface);
+  padding: 0 var(--pad-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.shop-balance { display: flex; align-items: center; gap: 7px; }
+.shop-balance-value {
+  font-weight: 800;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.shards {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  background: url("asset://icons/icon_shards.png") center / contain no-repeat;
+}
+.shards-lg { width: 18px; height: 18px; }
+
+.shop-list {
+  display: grid;
+  grid-auto-rows: 1fr;
+  gap: 2px;
+  background: var(--seam);
+  min-height: 0;
+}
+.shop-row {
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  border-left: 2px solid transparent;
+  padding: 0 var(--pad-lg) 0 calc(var(--pad-lg) - 2px);
+}
+.shop-icon {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.shop-text { flex: 1; min-width: 0; }
+.shop-name {
+  font-weight: 800;
+  font-size: 21px;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shop-price { display: flex; align-items: center; gap: 7px; flex: none; }
+.shop-price-value {
+  font-weight: 800;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+/* Affordability is the one judgement the panel adds, and it is the question the
+   player actually has: is the walk back worth it. Afford = the green step;
+   short = everything drops to the unresolved grey EXCEPT the price, which stays
+   legible because it is the number being compared. */
+.shop-row-afford .shop-price-value { color: var(--positive-400); }
+.shop-row-afford { border-left-color: var(--positive-500); }
+.shop-row-short .shop-icon { opacity: 0.34; }
+.shop-row-short .shop-name { color: var(--neutral-600); }
+.shop-row-short .shop-price-value { color: var(--neutral-500); }
+.shop-row-short .shards { opacity: 0.4; }
+
+/* Neither afford nor short: the balance has not resolved, so there is no
+   comparison to draw and the row must not imply one either way. */
+.shop-row-unknown .shop-price-value { color: var(--neutral-400); }
+
+/* Purchased: the item was bought from this slot. Dims the icon and name,
+   and displays SOLD in neutral text without an affordance border. */
+.shop-row-sold .shop-icon { opacity: 0.34; }
+.shop-row-sold .shop-name { color: var(--neutral-600); }
+.shop-row-sold .shop-price-value { color: var(--neutral-500); }
+
+/* The waiting and fault states fill the list instead of sitting as one row in
+   a six-row grid, which would leave five empty bands below them. */
+.shop-list-empty { grid-auto-rows: 1fr; }
+.shop-list-empty .shop-row { justify-content: center; padding: 0 var(--pad-lg); }
+
+/* — footer — */
+.diag {
+  height: var(--diag-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pad);
+  font-size: 11px;
+  color: var(--neutral-600);
+  letter-spacing: 0.02em;
+}
+.no-diag .diag,
+.no-diag .rule-diag {
+  display: none;
+}
+
+/* — full-screen curtain (between runs and failure screens) — */
+.between-runs,
+.curtain {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  padding: 0 var(--pad-lg);
+  gap: 12px;
+}
+.between-runs-active .kpis,
+.between-runs-active .rule-seam,
+.between-runs-active .body,
+.curtain-active .kpis,
+.curtain-active .rule-seam,
+.curtain-active .body {
+  display: none;
+}
+.between-runs-active .between-runs,
+.between-runs-active .curtain,
+.curtain-active .between-runs,
+.curtain-active .curtain {
+  display: flex;
+}
+.between-runs-message,
+.curtain-headline {
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: -0.025em;
+  color: var(--neutral-500);
+  line-height: 1.2;
+}
+.curtain-sub {
+  font-size: 15px;
+  color: var(--neutral-400);
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+.curtain-sub[hidden] {
+  display: none;
+}
+
+/* — view tabs — */
+/* Square, bordered, the gear's height: they sit in the same cluster and read
+   as the same family of control. The selected tab takes the gear's open
+   state, so "which view am I in" uses the one emphasis the header has. */
+.tabs { display: flex; gap: 2px; }
+.tab {
+  all: unset;
+  cursor: pointer;
+  height: 34px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--divider);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neutral-500);
+}
+.tab:hover { color: var(--neutral-100); }
+.tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+.tab[aria-selected="true"] {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--ground);
+}
+
+/* — run history — */
+/* The history view replaces the live panels and the curtain. body.view-history
+   outranks .curtain-active on purpose: a run ending puts the curtain up, and
+   the player looking at history must not be pulled off it. */
+body.view-history .kpis,
+body.view-history .rule-seam,
+body.view-history .body,
+body.view-history .between-runs,
+body.view-history .curtain {
+  display: none;
+}
+.history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--surface);
+}
+.history[hidden] { display: none; }
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--seam);
+}
+.history-empty {
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--surface);
+}
+/* The curtain's type, under its own names: app.js and the suites find the
+   curtain by .curtain-headline, and a second one on the page would be found
+   first. */
+.history-empty-headline {
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: -0.025em;
+  color: var(--neutral-500);
+  line-height: 1.2;
+}
+.history-empty-sub { font-size: 15px; color: var(--neutral-400); letter-spacing: 0.01em; }
+
+/* Rarity, one hue per code. Common is the neutral step; the rest climb the
+   way the game's own talent frames do, ending on the accent for Ultimate. */
+:root {
+  --rarity-common: var(--neutral-400);
+  --rarity-rare: #5aa9ff;
+  --rarity-epic: #b57cff;
+  --rarity-legendary: #d9a521;
+  --rarity-ultimate: var(--accent-500);
+  --defeat-tint: rgba(201, 75, 57, 0.10);
+}
+.talent-common { --rarity: var(--rarity-common); }
+.talent-rare { --rarity: var(--rarity-rare); }
+.talent-epic { --rarity: var(--rarity-epic); }
+.talent-legendary { --rarity: var(--rarity-legendary); }
+.talent-ultimate { --rarity: var(--rarity-ultimate); }
+.talent-unknown { --rarity: var(--neutral-600); }
+
+/* One run: a result strip down the left edge, tinted for the outcome. */
+.run { background: var(--surface); }
+.run-card {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 96px 160px 40px 68px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 18px;
+  padding: 12px var(--pad) 12px calc(var(--pad) - 4px);
+  border-left: 4px solid var(--accent-2-600);
+  background: var(--defeat-tint);
+  transition: background-color 80ms;
+}
+.run-victory .run-card {
+  border-left-color: var(--positive-500);
+  background: var(--positive-tint);
+}
+.run-card:hover { background-color: var(--surface-hover); }
+.run-card:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+
+.run-result { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.run-outcome {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-400);
+}
+.run-victory .run-outcome { color: var(--positive-400); }
+.run-difficulty { font-size: 13px; font-weight: 600; color: var(--neutral-100); }
+.run-when, .run-time { font-size: 11px; color: var(--neutral-500); }
+
+.run-hero { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.run-portrait {
+  width: 96px;
+  height: 96px;
+  flex: none;
+  background-color: transparent;
+  border: 0;
+}
+.run-map { font-size: 12px; color: var(--neutral-400); }
+
+.run-score { display: flex; flex-direction: column; gap: 2px; }
+.run-score-value {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.run-talents {
+  display: grid;
+  grid-template-columns: repeat(10, 48px);
+  justify-content: end;
+  gap: 6px;
+  min-width: 0;
+}
+.talent-slot {
+  box-sizing: border-box;
+  width: 48px;
+  height: 48px;
+  padding: 2px;
+  border: 2px solid var(--rarity, var(--divider));
+  background: var(--ground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.talent-slot-empty { border-color: var(--divider); background: rgba(0, 0, 0, 0.12); }
+.run-talents .talent-icon { width: 100%; height: 100%; }
+
+.run-none { font-size: 12px; color: var(--neutral-500); }
+
+.run-chevron { color: var(--neutral-500); justify-self: end; }
+.run-chevron svg { display: block; width: 18px; height: 18px; transition: transform 120ms; }
+.run-open .run-chevron svg { transform: rotate(180deg); }
+.run-card:hover .run-chevron { color: var(--neutral-100); }
+
+/* The expanded summary: the statistics page's groups, side by side. */
+.run-detail { border-left: 4px solid var(--divider); }
+.run-detail[hidden] { display: none; }
+.run-victory .run-detail { border-left-color: var(--positive-500); }
+.run-defeat .run-detail { border-left-color: var(--accent-2-600); }
+
+.run-block {
+  background: var(--ground);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.run-rows { margin: 0; display: flex; flex-direction: column; gap: 5px; }
+.run-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.run-row dt { color: var(--neutral-400); }
+.run-row dd { margin: 0; font-weight: 700; }
+.run-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.run-line-total { margin-top: 3px; font-weight: 800; font-size: 13px; }
+.talent-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-left: 7px;
+  border-left: 3px solid var(--rarity);
+}
+.talent-line-name { font-weight: 700; }
+.talent-line-rarity { color: var(--rarity); font-weight: 600; }
+
+.run-detail-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  padding: 0 22px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--divider);
+  background: var(--ground);
+}
+.run-detail-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 13px 0 11px;
+  background: transparent;
+  color: var(--neutral-500);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font: 700 11px var(--font);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.run-detail-tab:hover { color: var(--neutral-100); }
+.run-detail-tab[aria-selected="true"] { color: var(--neutral-100); border-bottom-color: var(--accent-500); }
+.run-detail-tab:focus-visible, .run-object:focus-visible, .run-melody:focus-visible {
+  outline: 2px solid var(--accent-400); outline-offset: 4px;
+}
+.run-tab-portrait { width: 36px; height: 36px; background: center / contain no-repeat; }
+.run-detail-panel { padding: 24px; min-height: 300px; background: var(--ground); }
+.run-detail-panel[hidden] { display: none; }
+.run-detail-panel > .run-block { max-width: 900px; }
+.run-detail-panel .run-block { padding: 0; gap: 18px; }
+.run-detail-panel .run-row { padding: 9px 0; font-size: 14px; border-bottom: 1px solid var(--surface-hover); }
+.run-detail-panel .run-rows { gap: 0; }
+.run-hero-details { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(200px, 1fr); gap: 28px; }
+.run-hero-overview { display: flex; align-items: center; gap: 28px; }
+.run-detail-portrait { width: 128px; height: 128px; flex: none; background: center / contain no-repeat; }
+.run-hero-overview .run-block { flex: 1; }
+.run-detail-talents { grid-column: 1 / -1; }
+.run-talent-build { display: flex; flex-wrap: wrap; gap: 12px; }
+.run-talent-build .talent-slot { width: 64px; height: 64px; }
+.run-talent-build .talent-icon { width: 100%; height: 100%; }
+.run-attributes { align-self: center; }
+.run-detail-total { font-size: 32px; font-weight: 800; }
+.run-score-icons { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 18px; max-width: 850px; }
+.run-score-entry { width: 64px; height: 64px; display: grid; place-items: center; }
+.run-score-entry:hover { background: var(--surface); }
+.run-score-entry:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 4px; }
+.run-score-icon { width: 52px; height: 52px; background: center / contain no-repeat; }
+.run-inventory { display: flex; flex-direction: column; gap: 32px; }
+.run-objects, .run-melodies { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 18px; max-width: 850px; }
+.run-object, .run-melody { width: 64px; height: 64px; position: relative; display: grid; place-items: center; }
+.run-object-frame { width: 46px; height: 46px; transform: rotate(45deg); border: 2px solid var(--object-rarity, var(--divider)); background: var(--surface); }
+.run-object-icon { width: 100%; height: 100%; background: center / contain no-repeat; }
+.run-object-frame .run-object-icon { transform: rotate(-45deg); }
+.object-common { --object-rarity: var(--rarity-common); }
+.object-rare { --object-rarity: var(--rarity-rare); }
+.object-epic { --object-rarity: var(--rarity-epic); }
+.object-legendary { --object-rarity: var(--rarity-legendary); }
+.object-cursed { --object-rarity: var(--accent-2-600); }
+.run-object-count { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); min-width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid var(--object-rarity, var(--divider)); background: var(--ground); font-size: 12px; font-weight: 800; border-radius: 50%; }
+.run-melody { border-bottom: 2px solid var(--divider); padding: 4px; }
+.run-melody.melody-active { border-bottom-color: var(--rarity-legendary); }
+.run-melody.melody-completed { border-bottom-color: var(--positive-400); }
+.run-melody.melody-locked { opacity: 0.5; }
+.run-damage-rows { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.run-damage-row { display: grid; grid-template-columns: 120px minmax(60px, 1fr) 130px; align-items: center; gap: 20px; font-size: 13px; }
+.run-damage-row dt { color: var(--neutral-400); }
+.run-damage-track { height: 16px; background: var(--surface); }
+.run-damage-fill { height: 100%; background: var(--accent-2-600); }
+.run-victory .run-damage-fill { background: var(--positive-500); }
+.run-damage-value { display: flex; justify-content: flex-end; gap: 15px; margin: 0; font-weight: 700; }
+.run-damage-percent { color: var(--neutral-500); min-width: 35px; text-align: right; }
+@media (max-width: 800px) {
+  .run-hero-details { grid-template-columns: 1fr; }
+  .run-hero-overview { gap: 16px; }
+  .run-damage-row { grid-template-columns: 100px minmax(20px, 1fr) 100px; gap: 12px; }
+}
+
+.run-portrait { background-size: contain; background-position: center; background-repeat: no-repeat; }
+.run-difficulty { display: flex; align-items: center; gap: 5px; }
+.run-difficulty-icon, .talent-icon {
+  display: inline-block; width: 22px; height: 22px; flex-shrink: 0;
+  background-size: contain; background-position: center; background-repeat: no-repeat;
+}
+.run-difficulty-icon { width: 40px; height: 40px; }
+.talent { display: inline-flex; align-items: center; gap: 5px; }
+.talent-line { align-items: center; }
+.talent-line-name { flex: 1; }
+
+
+
+@media (max-width: 1120px) {
+  .run-card { grid-template-columns: 88px 145px 32px 56px minmax(0, 1fr) 18px; gap: 12px; }
+  .run-portrait { width: 88px; height: 88px; }
+  .run-talents { grid-template-columns: repeat(10, 36px); gap: 4px; }
+  .talent-slot { width: 36px; height: 36px; }
+  .run-difficulty-icon { width: 32px; height: 32px; }
+}
+@media (max-width: 900px) {
+  .run-talents { grid-template-columns: repeat(5, 38px); gap: 5px; }
+  .talent-slot { width: 38px; height: 38px; }
+}
+@media (max-width: 640px) {
+  .run-card { grid-template-columns: 72px minmax(0, 1fr) 32px 48px 18px; gap: 10px; }
+  .run-portrait { width: 72px; height: 72px; }
+  .run-talents { grid-column: 2 / 5; grid-row: 2; justify-content: start; }
+  .run-chevron { grid-column: 5; grid-row: 1; }
+}
+
+.run-attribute-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.run-attribute { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.run-attribute-icon { width: 40px; height: 40px; background: center / contain no-repeat; }
+.run-attribute-value { font-size: 24px; font-weight: 700; }
+.run-attribute:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 4px; }
+
+/* Refugee stat textures have wider transparent margins than the HUD trio. */
+.run-attribute-icon.attribute-crit_chance { background-size: 70px; }
+.run-attribute-icon.attribute-crit_damage { background-size: 52px; }
+
+/* Run-history management stays secondary to the cards. */
+.history-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--divider); }
+.history-action { font: inherit; font-size: 13px; color: var(--neutral-400); background: transparent; border: 1px solid var(--divider); padding: 7px 11px; cursor: pointer; }
+.history-action:hover { color: var(--neutral-100); border-color: var(--neutral-400); }
+.history-action:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+.history-action:disabled { opacity: .4; cursor: default; }
+.history-action.history-danger { color: var(--accent-400); }
+.history-delete-all { margin-left: auto; }
+.history-select-all { display: flex; align-items: center; gap: 7px; color: var(--neutral-400); font-size: 13px; }
+.history-select-all[hidden], .history-action[hidden] { display: none; }
+.history input[type="checkbox"] { accent-color: var(--accent-500); width: 17px; height: 17px; cursor: pointer; }
+.history-selecting .run { display: grid; grid-template-columns: 36px minmax(0, 1fr); }
+.run-selection { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--divider); }
+.history-selecting .run-card { grid-column: 2; }
+.history-selecting .run-detail { grid-column: 1 / -1; }
+.run-detail-actions { display: flex; justify-content: flex-end; padding: 10px 18px; border-top: 1px solid var(--divider); }
+.history-delete-dialog { box-sizing: border-box; width: min(540px, calc(100vw - 36px)); max-height: calc(100vh - 48px); overflow-y: auto; padding: 26px; color: var(--neutral-100); background: var(--surface); border: 1px solid var(--divider); box-shadow: 0 18px 80px #0009; }
+.history-delete-dialog::backdrop { background: #000b; }
+.stylized-fonts .history-delete-dialog h2 { font-family: "Germania One", var(--font); font-weight: 400; }
+.history-delete-dialog h2 { margin: 12px 0; font-size: 27px; }
+.history-delete-dialog p { color: var(--neutral-400); line-height: 1.5; }
+.history-delete-review { max-height: 180px; overflow-y: auto; padding: 10px 10px 10px 25px; font-size: 14px; line-height: 1.5; border: 1px solid var(--divider); }
+.history-delete-review li + li { margin-top: 8px; }
+.history-delete-phrase { display: grid; gap: 8px; font-size: 15px; }
+.history-delete-phrase[hidden] { display: none; }
+.history-delete-phrase input { box-sizing: border-box; width: 100%; background: var(--ground); border: 1px solid var(--neutral-400); color: var(--neutral-100); padding: 10px; font: inherit; }
+.history-delete-phrase input:focus { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+.history-delete-dialog .history-delete-error { color: var(--accent-400); }
+.history-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+.tip-head { display: flex; align-items: center; gap: 12px; }
+.tip-icon { width: 46px; height: 46px; flex: none; background: center / contain no-repeat; border: 2px solid var(--tip-rarity, var(--divider)); }
+.tip-icon[hidden], .tip-meta[hidden] { display: none; }
+.tip-meta { margin-top: 4px; font-size: 12px; color: var(--tip-rarity, var(--neutral-400)); }
+.tip-talent { box-sizing: border-box; max-height: calc(100vh - 20px); overflow-y: auto; width: min(420px, calc(100vw - 20px)); max-width: calc(100vw - 20px); border-color: var(--tip-rarity, var(--divider)); }
+.tip-talent .tip-body { font-size: 14px; line-height: 1.5; margin-top: 14px; }
+.tip[data-rarity="common"] { --tip-rarity: var(--rarity-common); }
+.tip[data-rarity="rare"] { --tip-rarity: var(--rarity-rare); }
+.tip[data-rarity="epic"] { --tip-rarity: var(--rarity-epic); }
+.tip[data-rarity="legendary"] { --tip-rarity: var(--rarity-legendary); }
+.tip[data-rarity="ultimate"] { --tip-rarity: var(--rarity-ultimate); }
+.run-melodies { grid-template-columns: repeat(auto-fill, 96px); row-gap: 24px; }
+.run-melody { width: 96px; height: 96px; box-sizing: border-box; grid-template-rows: 64px auto; }
+.run-melody > .run-object-icon { width: 64px; height: 64px; }
+.run-melody-progress { font-size: 12px; white-space: nowrap; color: var(--neutral-400); }
+.melody-completed .run-melody-progress { color: var(--positive-400); }
+
+.run-talent-build .talent:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 3px; }
+
+.run-share-status { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: right; color: var(--neutral-400); font-size: 14px; align-self: center; margin-right: 14px; }

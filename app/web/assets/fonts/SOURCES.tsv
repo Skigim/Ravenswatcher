@@ -1,0 +1,30 @@
+# Vendored web font for tools/web/index.html, replacing the Google Fonts
+# <link> tags (fonts.googleapis.com/fonts.gstatic.com) so the packaged app
+# renders correctly with no network access.
+#
+# Archivo-variable-latin.woff2 is the *variable* font (single file, wght
+# axis 400-800) that Google Fonts' css2 endpoint itself serves for a
+# same-origin request naming weights 400;500;600;700;800 with a UA that
+# advertises variable-font support (Chromium 120+, which covers the
+# Electron/Chromium runtime this file is vendored for) -- all five
+# requested weights resolved to this one URL, confirmed by inspecting the
+# raw @font-face rules returned. Latin subset only: the readout renders
+# ASCII text exclusively, so latin-ext/vietnamese/cyrillic subsets the
+# stylesheet also offers were not fetched.
+#
+# License: SIL Open Font License 1.1 (OFL.txt in this directory, fetched
+# unmodified from the canonical google/fonts mirror). Free to bundle,
+# embed and redistribute with this app; the font itself just can't be
+# sold standalone and reserved names can't be reused by a derivative --
+# neither applies here.
+asset	source_url	sha1	bytes
+Archivo-variable-latin.woff2	https://fonts.gstatic.com/s/archivo/v25/k3kPo8UDI-1M0wlSV9XAw6lQkqWY8Q82sLydOxI.woff2	65449f1605378d8a5661bb33558d6bc69ca77a17	34928
+OFL.txt	https://raw.githubusercontent.com/google/fonts/main/ofl/archivo/OFL.txt	(license text, SIL OFL 1.1, Copyright 2020 The Archivo Project Authors)	4388
+
+# Germania One and Alegreya Sans: unmodified original Google Fonts releases.
+# SIL OFL 1.1; separate original licenses retained alongside the files.
+GermaniaOne-Regular.ttf	https://raw.githubusercontent.com/google/fonts/main/ofl/germaniaone/GermaniaOne-Regular.ttf	04d9408db5e6d9e2f21318eac14f5687c561fd41	33240
+GermaniaOne-OFL.txt	https://raw.githubusercontent.com/google/fonts/main/ofl/germaniaone/OFL.txt	a23a24467a079dd0f44c3a15ca5b9d72e9212a3e	4439
+AlegreyaSans-Regular.ttf	https://raw.githubusercontent.com/google/fonts/main/ofl/alegreyasans/AlegreyaSans-Regular.ttf	5e8ee7ef7a27fc4608c6f27f78ce65070157c569	263804
+AlegreyaSans-Bold.ttf	https://raw.githubusercontent.com/google/fonts/main/ofl/alegreyasans/AlegreyaSans-Bold.ttf	2dd03b406fb8a34060d6c777b2c9d3214094e9f7	266856
+AlegreyaSans-OFL.txt	https://raw.githubusercontent.com/google/fonts/main/ofl/alegreyasans/OFL.txt	50c4edc5c487aaf1f4ede4fcfdd7fd3986a62049	4405

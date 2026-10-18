@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Struct layout knowledge shared by tools/discover_values.py and",
+    "app/reader/values.ts. Both read this file; neither restates a value.",
+    "Hex strings so the numbers read the way they do in a debugger.",
+    "BINDING_VTABLE_RVA is bootstrapped per game build -- see the",
+    "discover_values.py docstring for how to re-derive it if a patch moves it.",
+    "This is the struct layout registry, not the set of keys either side",
+    "happens to consume: BINDING_SETTINGS_OFFSET is read only by the Python",
+    "chain walk today, and belongs here because it describes the same structs."
+  ],
+  "BINDING_VTABLE_RVA": "0xF0D968",
+  "NAME_PTR_OFFSET": "0x68",
+  "DEFAULT_VAL_OFFSET": "0x98",
+  "BINDING_SETTINGS_OFFSET": "0x18",
+  "BINDING_VTABLE_OFFSET": "0x20",
+  "UNION_OFFSET_BINDING": "0x48"
+}

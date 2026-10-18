@@ -1,5 +1,4 @@
 # Ravenswatcher
-<img width="1266" height="793" alt="image" src="https://github.com/user-attachments/assets/86e51d3f-d74b-42a8-b692-5a560956fa0f" />
 
 A second-screen window for [Ravenswatch](https://store.steampowered.com/app/2071280/Ravenswatch/) that shows what the current run has put on the map, what the Sandman is selling, and which melodies are in play. It reads the running game and updates as you play. It changes nothing in the game.
 
@@ -7,7 +6,7 @@ Built for Windows. It also runs on Linux under Proton; see [Linux](#linux).
 
 ## Install
 
-1. Download the latest `Ravenswatcher-<version>-win-x64.zip` from the [Releases page](../../releases/latest).
+1. Download the latest `Ravenswatcher-<version>-win-x64.zip` from the [Releases page](https://github.com/Skigim/Ravenswatcher/releases/latest).
 2. Extract the folder anywhere. There is no installer.
 3. Run `Ravenswatcher.exe`.
 
@@ -19,7 +18,9 @@ To uninstall, delete the folder. The app stores its settings in your Windows use
 
 Start the game, then start the readout, or the other way round. The window says **Not running** until it finds the game and **Live** once it has. Panels fill in as a run loads: the questline and melodies first, the map a moment after the level loads, the Sandman's offers after you open his shop once.
 
-Hover anything for details: an item's effect, a melody's effect and note count, what a map icon is.
+Hover anything for details: an item's effect, a melody's effect and note count, what a map icon is, and the expected boss at an optional boss shrine or den.
+
+To keep track of what you've cleared, click a map icon: each click takes one off its count, and the last one marks it done with a check. Right-click to undo a click. The marks reset when the map changes.
 
 The gear opens settings: rules between the panels, a diagnostics footer, and how many map icons sit across a row.
 
@@ -50,10 +51,39 @@ The readout shows things the other players can't see. In a co-op run it asks you
 
 ## Antivirus
 
-The app reads the game's memory to do its job, which some antivirus products treat as suspicious. It makes no network connections and writes nothing outside its own settings.
+The app reads the game's memory to do its job, which some antivirus products treat as suspicious. Its only network request is one check at launch for a newer release on GitHub. It writes only its own settings and a cache of icons and item text that it builds from your game install.
 
 ## Support
 
 If the tool is useful to you, there's a **Support on Ko-fi** button in the settings panel.
 
-Problems and requests go in [Issues](../../issues).
+Problems and requests go in [Issues](https://github.com/Skigim/Ravenswatcher/issues).
+
+## Build from source
+
+On Windows, install Node.js 22.15 or newer (including Node 24/26) and Git:
+
+```powershell
+git clone https://github.com/Skigim/Ravenswatcher.git
+cd Ravenswatcher/app
+npm ci
+npm test
+npm start
+```
+
+`npm run dist` builds the portable zip in `build/release/` at the repository
+root. The build and tests need no game dump, Python, or private repository.
+The app needs your own installed copy of Ravenswatch to display live data.
+It decodes icons and item descriptions from that install at runtime.
+
+The source is in `app/`: `reader/` reads game memory, `assets/` decodes local
+resources, and `web/` renders the readout. See [CONTRIBUTING.md](CONTRIBUTING.md)
+and [engineering_constraints.md](engineering_constraints.md).
+
+## License
+
+Original project code is available under the [MIT License](LICENSE).
+The bundled Archivo font retains its SIL Open Font License; see
+[third-party notices](app/THIRD_PARTY_NOTICES.md). Ravenswatch game art and
+full item-description tables are not included in this source repository.
+Ravenswatch and its game content belong to their respective owners.

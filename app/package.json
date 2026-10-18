@@ -1,0 +1,45 @@
+{
+  "name": "ravenswatch-live-readout",
+  "version": "0.1.6",
+  "private": true,
+  "description": "Electron shell hosting the live Ravenswatcher readout page, with the memory reader running on Electron's own Node runtime.",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc && node scripts/build-icon.js",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node reader/test/run-all.js",
+    "dist": "npm run build && node scripts/stage-dist.js && electron-builder --projectDir ../build/stage"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.0.12",
+    "typescript": "^7.0.2"
+  },
+  "build": {
+    "appId": "com.ravenswatcher.app",
+    "productName": "Ravenswatcher",
+    "directories": {
+      "output": "../build/release"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "asarUnpack": [
+      "**/*.node"
+    ]
+  },
+  "dependencies": {
+    "koffi": "^3.1.6"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Skigim/Ravenswatcher.git"
+  }
+}

@@ -1,0 +1,44 @@
+@font-face {
+  font-family: "Archivo";
+  /* format("woff2"), not the "woff2-variations" draft identifier: that
+     string was never in the shipped spec, and a UA that doesn't recognise a
+     format hint is entitled to skip the source entirely -- which would drop
+     the page silently to system-ui. The variable axis is declared by the
+     font-weight range below, not by the format hint. */
+  src: url("assets/fonts/Archivo-variable-latin.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Germania One";
+  src: url("assets/fonts/GermaniaOne-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alegreya Sans";
+  src: url("assets/fonts/AlegreyaSans-Regular.ttf") format("truetype");
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alegreya Sans";
+  src: url("assets/fonts/AlegreyaSans-Bold.ttf") format("truetype");
+  font-weight: 600 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+.g-macron { position: relative; display: inline-block; }
+.stylized-fonts .germania-name .g-macron > .glyph-source {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.stylized-fonts .germania-name .g-macron::before { content: "o"; }
+.stylized-fonts .germania-name .g-macron::after {
+  content: "¯"; position: absolute; top: 0; left: 50%; transform: translateX(-50%); font: inherit; line-height: inherit;
+}

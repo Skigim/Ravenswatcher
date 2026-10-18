@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Must sit above the first <link>: a <meta> policy only governs what the
+     parser reaches after it. Everything this page loads from disk is a
+     sibling file -- styles.css, app.js, the vendored woff2 in assets/fonts/
+     -- so 'self' covers those; there are no remote origins left to permit
+     since the Google Fonts <link>s were dropped for the local @font-face.
+     img-src is named because icons come from the asset: scheme main.js
+     serves out of the cache it decodes from the player's own game install.
+     default-src already covers script/style/font/connect, so naming those
+     again would only repeat 'self'; the four directives after it are the
+     ones default-src does not imply or that 'none' tightens further.
+     Note frame-ancestors, sandbox and report-uri are deliberately absent:
+     they are ignored in a <meta> policy and only earn a console warning. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' asset:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ravenswatcher</title>
+<link rel="icon" href="asset://icons/icon_level.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="view-history">
+<div class="shell">
+
+  <header class="head">
+    <div class="brand">
+      <div class="wordmark">RAVENSWATCHER</div>
+      <div class="brand-rule"></div>
+      <div class="kicker">Live run readout</div>
+    </div>
+    <div class="head-cluster">
+      <!-- The two views. app.js swaps them with .view-history on <body>; the
+           live readout keeps painting underneath, so switching back shows the
+           current frame rather than waiting for the next. -->
+      <div class="tabs" role="tablist" aria-label="View">
+        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="false" aria-controls="live-view">Live</button>
+        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="true" aria-controls="history">History</button>
+      </div>
+      <div class="head-right" id="head-right"></div>
+      <!-- Same box as the gear, but a link: it leaves the window for the
+           public issues page, and main.js lets it out only because github.com
+           is in external-links.js. -->
+      <a class="gear" id="bug-report" href="https://github.com/Skigim/Ravenswatcher/issues" target="_blank" rel="noopener"
+         aria-label="Report a bug" title="Report a bug">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true" focusable="false">
+          <path d="M8 2l1.9 1.9M16 2l-1.9 1.9"></path>
+          <path d="M9 7.5a3 3 0 0 1 6 0"></path>
+          <rect x="7" y="7.5" width="10" height="13" rx="5"></rect>
+          <path d="M12 7.5v13M7 13H3M21 13h-4M7.5 9L4 6.5M16.5 9L20 6.5M7.5 17L4 19.5M16.5 17L20 19.5"></path>
+        </svg>
+      </a>
+      <button class="gear" id="settings-open" type="button"
+              aria-label="Settings" aria-expanded="false" aria-controls="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="3.2"></circle>
+          <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Shown by applyUpdate() when the launch check found a newer release
+       and the player has neither skipped that version nor dismissed the bar
+       this session. The download link leaves the window through the
+       github.com allowlist in external-links.js. role="status" so a
+       screen reader announces the bar when it appears. -->
+  <div class="update-bar" id="update-bar" role="status" hidden>
+    <span class="update-text" id="update-text"></span>
+    <a class="update-btn update-btn-primary" id="update-download" target="_blank" rel="noopener">Download</a>
+    <button class="update-btn" id="update-skip" type="button">Skip this release</button>
+    <button class="update-btn" id="update-later" type="button">Remind me later</button>
+  </div>
+
+  <div class="rule rule-band"></div>
+
+  <!-- Four cells, one row: the questline and the three melodies. Hero level
+       and the map name are not here: the game already puts both on screen,
+       and the band is the scarcest space in the shell.
+       #melody-cards is display:contents so its three children sit in this
+       grid directly -- app.js needs one host to rebuild, the grid needs four
+       siblings, and a wrapper that generates no box gives both. -->
+  <section class="kpis">
+    <div class="kpi">
+      <div class="kpi-top">
+        <div class="kicker">Questline</div>
+        <div class="kpi-icon" id="quest-icon"></div>
+      </div>
+      <div class="kpi-value" id="quest-name">—</div>
+    </div>
+
+    <div id="melody-cards"></div>
+  </section>
+
+  <div class="rule rule-seam"></div>
+
+  <main class="body" id="live-view">
+    <div class="shop" id="shop">
+      <div class="shop-head">
+        <div class="kicker-row">
+          <div class="kicker">Sandman offers</div>
+          <div class="badge" id="shop-badge" hidden></div>
+        </div>
+        <div class="shop-balance">
+          <span class="shop-balance-value" id="shop-balance">—</span>
+          <span class="shards shards-lg"></span>
+        </div>
+      </div>
+      <div class="shop-list" id="shop-list"></div>
+    </div>
+    <div class="tiles" id="tiles">
+      <div class="tiles-head">
+        <div class="kicker">On the map</div>
+      </div>
+      <div class="tiles-list" id="tiles-list"></div>
+    </div>
+  </main>
+
+  <!-- Past runs, newest first. Each card expands in place to the summary. -->
+  <section class="history" id="history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="history-toolbar" id="history-toolbar">
+      <button class="history-action" id="history-select" type="button">Select runs</button>
+      <label class="history-select-all" id="history-select-all-label" hidden><input id="history-select-all" type="checkbox"> Select all</label>
+      <button class="history-action history-danger" id="history-delete-selected" type="button" hidden>Delete selected</button>
+      <button class="history-action" id="history-selection-cancel" type="button" hidden>Cancel selection</button>
+      <button class="history-action history-danger history-delete-all" id="history-delete-all" type="button">Delete all history</button>
+    </div>
+    <div class="history-list" id="history-list"></div>
+  </section>
+
+  <div class="rule rule-band rule-diag"></div>
+  <footer class="diag" id="diag"></footer>
+
+</div>
+
+<!-- Sits outside .shell, which is overflow:hidden and would clip an inset
+     ring drawn inside it. Always present, painted only while .in-combat is
+     on <body>; see "combat edge" in styles.css. -->
+<div class="combat-edge" id="combat-edge" aria-hidden="true"></div>
+
+<!-- The one tooltip. app.js fills it from data-tip-name / data-tip-body on
+     the element under the pointer and positions it; see "tooltip" in
+     styles.css for why it sits out here. -->
+<div class="tip" id="tip" role="tooltip" hidden>
+  <div class="tip-head">
+    <div class="tip-icon" id="tip-icon" aria-hidden="true" hidden></div>
+    <div><div class="tip-name" id="tip-name"></div><div class="tip-meta" id="tip-meta" hidden></div></div>
+  </div>
+  <div class="tip-body" id="tip-body"></div>
+</div>
+
+<div class="settings-scrim" id="settings-scrim" hidden></div>
+<aside class="settings" id="settings" role="dialog" aria-label="Settings" hidden>
+  <div class="settings-head"><div class="kicker">Settings</div></div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Panel lines</div>
+      <div class="settings-note">Rules between the boxes</div>
+    </div>
+    <button class="switch" id="panel-lines" type="button" role="switch" aria-checked="true">
+      <span class="switch-on">On</span><span class="switch-off">Off</span>
+    </button>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Stylized fonts</div>
+      <div class="settings-note">Germania One and Alegreya Sans</div>
+    </div>
+    <button class="switch" id="stylized-fonts" type="button" role="switch" aria-label="Stylized fonts" aria-checked="true">
+      <span class="switch-on">On</span><span class="switch-off">Off</span>
+    </button>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Diagnostics</div>
+      <div class="settings-note">Reader telemetry in footer</div>
+    </div>
+    <button class="switch" id="diag-bar" type="button" role="switch" aria-checked="false">
+      <span class="switch-on">On</span><span class="switch-off">Off</span>
+    </button>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Tiles across</div>
+      <div class="settings-note">Columns in the map panel</div>
+    </div>
+    <div class="slider">
+      <input class="slider-input" id="tile-cols" type="range" min="3" max="8" step="1" value="5"
+             aria-label="Tiles across">
+      <output class="slider-value" id="tile-cols-value" for="tile-cols">5</output>
+    </div>
+  </div>
+  <!-- Ignores skip and dismiss on purpose: the download stays reachable
+       here after the bar is gone. -->
+  <div class="settings-row">
+    <div>
+      <div class="settings-label" id="version-label">Version</div>
+      <div class="settings-note" id="version-note"></div>
+    </div>
+    <a class="coffee" id="version-download" target="_blank" rel="noopener" hidden>Download</a>
+  </div>
+  <!-- The href is the one place the link lives. main.js only lets https
+       links to the hosts in external-links.js out of the window, so a
+       typo in the host makes the button do nothing rather than open a
+       second window. -->
+  <div class="settings-foot">
+    <div class="settings-note">Enjoying the tool?</div>
+    <a class="coffee" id="coffee" href="https://ko-fi.com/skigim" target="_blank" rel="noopener">Support on Ko-fi</a>
+  </div>
+</aside>
+
+<div class="settings-scrim" id="coop-scrim" hidden></div>
+<aside class="coop-dialog" id="coop-dialog" role="dialog" aria-labelledby="coop-headline" hidden>
+  <div class="coop-head"><div class="kicker" id="coop-headline">You're in a co-op run</div></div>
+  <div class="coop-body">
+    <p>This tool shows things the other players can't see. If I use it to spoil, grief, or otherwise ruin someone's game, I'm an asshole and deserve to be shamed.</p>
+    <p>I'll only use it for myself, and I'll turn it off if my group doesn't want it.</p>
+  </div>
+  <div class="coop-actions">
+    <button class="coop-btn coop-btn-primary" id="coop-agree" type="button">I agree</button>
+    <button class="coop-btn" id="coop-decline" type="button">Not this time</button>
+  </div>
+</aside>
+
+<dialog class="history-delete-dialog" id="history-delete-dialog" aria-labelledby="history-delete-title" aria-describedby="history-delete-description">
+  <div class="kicker" id="history-delete-step"></div>
+  <h2 id="history-delete-title">Delete history</h2>
+  <p id="history-delete-description"></p>
+  <ul class="history-delete-review" id="history-delete-review"></ul>
+  <label class="history-delete-phrase" id="history-delete-phrase" hidden>
+    <span id="history-delete-prompt"></span>
+    <input id="history-delete-input" type="text" autocomplete="off" spellcheck="false">
+  </label>
+  <p class="history-delete-error" id="history-delete-error" role="alert"></p>
+  <div class="history-delete-actions">
+    <button class="history-action" id="history-delete-cancel" type="button">Cancel</button>
+    <button class="history-action history-danger" id="history-delete-confirm" type="button">Continue</button>
+  </div>
+</dialog>
+
+<script src="run-presentation.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
