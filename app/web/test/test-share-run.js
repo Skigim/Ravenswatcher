@@ -12,6 +12,8 @@ const {RunSharer}=require('../../share');
 const dir=process.env.RW_SHARE_TEST_DIR;
 assert.ok(dir&&path.dirname(dir)===os.tmpdir()&&path.basename(dir).startsWith('rw-share-ui-'));
 app.setPath('userData',path.join(dir,'profile'));
+// CI may have no usable GPU. Exercise real offscreen exports in that mode too.
+if(process.argv.includes('--disable-gpu'))app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('force-device-scale-factor',process.argv.find(arg=>arg.startsWith('--scale='))?.slice(8) || '1');
 protocol.registerSchemesAsPrivileged([{scheme:'asset',privileges:{standard:true,secure:true,corsEnabled:true}}]);
 const fixture={v:1,id:100,hero:'Hero_Kintaro_Raven',hero_definition:'Heroes\\Kintaro.herodef.ot',map_name:'Baba Yaga Map',difficulty:2,result:'victory',playtime_s:4093,score:{total:578,details:['Secret modifier should never appear']},

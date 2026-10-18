@@ -54,6 +54,7 @@ const SPAWNED = [
   ['test-share-run', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
   ['test-share-run-scale1.5', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
   ['test-share-run-scale2', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
+  ['test-share-run-software', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
   ['test-history-view', path.join(__dirname, '..', '..', 'web', 'test', 'test-history-view.js')],
 ];
 
@@ -113,7 +114,7 @@ function runSpawned(name, entry, electron) {
   const fixtureDir = name === 'test-history-delete' ? fs.mkdtempSync(path.join(os.tmpdir(), 'rw-delete-ui-')) : name.startsWith('test-share-run') ? fs.mkdtempSync(path.join(os.tmpdir(), 'rw-share-ui-')) : null;
   let res;
   try {
-    res = spawnSync(electron, name.startsWith('test-share-run-scale') ? [entry, '--scale='+name.slice('test-share-run-scale'.length)] : [entry], {
+    res = spawnSync(electron, name === 'test-share-run-software' ? [entry, '--disable-gpu'] : name.startsWith('test-share-run-scale') ? [entry, '--scale='+name.slice('test-share-run-scale'.length)] : [entry], {
       stdio: 'inherit',
       timeout: SPAWN_TIMEOUT_MS,
       killSignal: 'SIGKILL',

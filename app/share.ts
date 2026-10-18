@@ -23,6 +23,7 @@ export class RunSharer {
     this.busy = true;
     let win: BrowserWindow | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopWaitingForPaint: (() => void) | undefined;
     let cancelled = false;
     try {
       // Snapshot before awaiting so history refresh/deletion cannot change it.
@@ -49,12 +50,31 @@ export class RunSharer {
         if (bounds.width!==1600 || !Number.isInteger(bounds.height) || bounds.height<1000 || bounds.height>16000) throw new Error('This run image is too large to copy.');
         // Leave two CSS pixels around the capture to absorb Windows fractional-DPI rounding.
         view.setContentSize(bounds.width+2,bounds.height+2);
-        await view.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-        const captured = await view.webContents.capturePage({x:0,y:0,...bounds});
+        const viewport: {width:number;height:number} = await view.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve({width:innerWidth,height:innerHeight}))))');
+        // Offscreen rendering already provides a bitmap. capturePage asks Viz
+        // to copy a surface again, which can fail with UnknownVizError on
+        // software-rendered Windows runners. Request a fresh painted frame.
+        const [viewWidth=0,viewHeight=0] = view.getContentSize();
+        const frame = await new Promise<NativeImage>(resolve => {
+          const onPaint = (_event: Electron.Event, _dirty: Electron.Rectangle, image: NativeImage) => {
+            const size = image.getSize();
+            // Native window sizes can round differently at fractional DPI;
+            // match the bitmap to the renderer's actual CSS viewport.
+            const scale = size.width / viewport.width;
+            // Ignore an empty or stale frame from before the resize.
+            if (image.isEmpty() || !(scale>0) || Math.abs(size.height-viewport.height*scale)>1) return;
+            stopWaitingForPaint?.();
+            resolve(image);
+          };
+          stopWaitingForPaint = () => view.webContents.removeListener('paint',onPaint);
+          view.webContents.on('paint',onPaint);
+          view.webContents.invalidate();
+        });
         if (cancelled) throw new Error('Share cancelled.');
+        const frameScale = frame.getSize().width / viewport.width;
+        const captured = frame.crop({x:0,y:0,width:Math.round(bounds.width*frameScale),height:Math.round(bounds.height*frameScale)});
         const size = captured.getSize();
         const scale = size.width / bounds.width;
-        const [viewWidth=0,viewHeight=0] = view.getContentSize();
         if (captured.isEmpty() || !(scale>0) || Math.abs(size.height-bounds.height*scale)>1 || viewWidth<bounds.width || viewHeight<bounds.height) {
           console.error('[share] Incomplete capture', {bounds,scale,size,contentSize:view.getContentSize()});
           throw new Error('Could not capture the complete run image.');
@@ -72,6 +92,7 @@ export class RunSharer {
       return {ok:false,error:error instanceof Error?error.message:'Could not copy this run.'};
     } finally {
       cancelled=true;if(timer)clearTimeout(timer);
+      stopWaitingForPaint?.();
       if(win&&!win.isDestroyed())win.destroy();
       this.busy=false;
     }
