@@ -29,7 +29,7 @@ function open(file: string): DatabaseSync {
     db.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL;');
     const version = db.prepare('PRAGMA user_version').get()?.user_version;
     if (version !== 0 && version !== 1) throw new Error(`unsupported history database version ${version}`);
-    db.exec(`
+    if (version === 0) db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
         id INTEGER PRIMARY KEY,
         version INTEGER NOT NULL,
@@ -99,15 +99,18 @@ export function deleteRuns(file: string, history: History, ids: readonly number[
   history.runs = history.runs.filter(run => !removed.has(run.id));
 }
 
-/** Delete only the known history files, never the containing user profile. */
-export function deleteHistoryFile(file: string, history: History): void {
-  // Connections are short lived and closed before this synchronous operation.
-  if (fs.existsSync(file)) fs.unlinkSync(file);
+/** Clear every row atomically, including rows that could not be loaded. */
+export function clearHistory(file: string, history: History): void {
+  const db = open(file);
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec('DELETE FROM runs');
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  } finally { db.close(); }
   history.runs = [];
   history.skipped = 0;
-  for (const suffix of ['-wal', '-shm', '-journal']) {
-    if (fs.existsSync(file + suffix)) fs.unlinkSync(file + suffix);
-  }
 }
 
 type DeletionScope = 'single' | 'selected' | 'all';

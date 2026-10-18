@@ -34,7 +34,10 @@ class Reader {
     this.fatal = null;
     this.diagnostic = null;
     this.closing = false;
+    this._closePromise = null;
+    this._workerExits = new Map();
     this._lastHeroLevel = null;
+    this._lastObservedMapId = null;
     this._lastRelayedGateAddr = null;
     this._lastRelayedMapId = null;
     // Assigned by the caller when it wants the Sandman channel to push rather
@@ -60,7 +63,9 @@ class Reader {
     const w = new Worker(path.join(__dirname, file),
       { workerData: { pid: this.pid, base: this.base } });
     w.unref();
+    this._workerExits.set(w, new Promise(resolve => w.once('exit', resolve)));
     w.on('message', (m) => {
+      if (this.closing) return;
       if (!m || typeof m !== 'object') return;
       if (m.type === 'fatal') this.fatal = m.message;
       else if (m.type === 'gone') this.fatal = m.message || 'target process exited';
@@ -185,17 +190,15 @@ class Reader {
   get(name) {
     const entry = this.resolved[name];
     if (entry === undefined) return null;
-    const val = this.pollValue(entry.binding_addr, entry.variant, entry.is_float);
-    if (name === 'Hero Level' && val !== null) {
-      if (this._lastHeroLevel !== null && val < this._lastHeroLevel) {
-        this.clearRun();
-      }
-      this._lastHeroLevel = val;
-    }
-    if (name === 'Current map id' && val === -1) {
-      this.clearRun();
-    }
-    return val;
+    return this.pollValue(entry.binding_addr, entry.variant, entry.is_float);
+  }
+
+  updateTransitions(heroLevel, mapId) {
+    const reset = heroLevel !== null && this._lastHeroLevel !== null && heroLevel < this._lastHeroLevel;
+    const outsideRun = mapId === -1 && this._lastObservedMapId !== -1;
+    if (reset || outsideRun) this.clearRun();
+    if (heroLevel !== null) this._lastHeroLevel = heroLevel;
+    if (mapId !== null) this._lastObservedMapId = mapId;
   }
 
   pollValue(bindingAddr, variant, isFloat) {
@@ -220,17 +223,16 @@ class Reader {
   found() { return Object.keys(this.resolved).length; }
 
   close() {
+    if (this._closePromise) return this._closePromise;
     this.closing = true;
-    // Known and accepted: terminate() landing while a worker is inside a native
-    // ReadProcessMemory throws a napi fatal that takes the whole process down
-    // rather than exiting cleanly. Observed 2026-09-04. It only happens on the
-    // way out, so the exit status is wrong and nothing else is -- not worth a
-    // graceful-shutdown handshake.
-    this.worker.terminate();
-    this.sandmanWorker.terminate();
-    this.tilesWorker.terminate();
-    this.runsWorker.terminate();
-    this.proc.close();
+    this.onSandmanChange = null;
+    this.onRunSummary = null;
+    for (const worker of this._workerExits.keys()) {
+      worker.ref(); // Keep the reader process alive until native work has drained.
+      worker.postMessage({ type: 'stop' });
+    }
+    this._closePromise = Promise.all(this._workerExits.values()).then(() => this.proc.close());
+    return this._closePromise;
   }
 }
 

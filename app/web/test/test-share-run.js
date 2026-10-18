@@ -21,7 +21,9 @@ const fixture={v:1,id:100,hero:'Hero_Kintaro_Raven',hero_definition:'Heroes\\Kin
  objects:['a','b'],object_counts:[0,301],melodies:[{name:'First',state:'completed',notes:4},{name:'Second',state:'active',notes:5,notes_earned:0},{name:'Third',state:'locked',notes:4}],
  damage:{total:100,attack:75,power:25,special:0,ultimate:0,dash:0,trait:0,defense:0,other:0,highest:30}};
 const tables={OBJECT_KEYS:{a:'one',b:'two'},ITEM_NAMES:{one:'Fixture Object',two:'Second Object'},OBJECT_RARITIES:{a:'Common',b:'Epic'}};
-fs.writeFileSync(path.join(dir,'tables.json'),JSON.stringify(tables));
+// No tables.json exists: export must use the injected snapshot.
+let currentTables=tables,tableReads=0;
+const cachedTables=()=>{tableReads++;return currentTables;};
 let view,ui,writes=0,captured;
 async function main() {
   // Deliberately missing art proves names still render and decode failure is bounded.
@@ -43,22 +45,26 @@ async function main() {
   await render({...fixture,score:null,talents:null,objects:null,melodies:[{name:'Unknown',state:'active',notes:4,notes_earned:null}],damage:{}});
   data=await js('document.body.textContent');assert.ok(data.includes('—/4 notes')&&data.includes('Talents not recorded.')&&data.includes('Objects not recorded.'));
   const before=JSON.stringify(fixture);
-  const sharer=new RunSharer({findRun:id=>id===100?fixture:undefined,cacheDir:()=>dir,writeImage:image=>{writes++;captured=image;}});
+  const sharer=new RunSharer({findRun:id=>id===100?fixture:undefined,tables:cachedTables,writeImage:image=>{writes++;captured=image;}});
   assert.strictEqual((await sharer.share({runId:99,stylizedFonts:true})).ok,false);
   assert.strictEqual((await sharer.share({runId:'100',stylizedFonts:true})).ok,false);
-  assert.strictEqual(writes,0);
+  assert.strictEqual(writes,0);assert.strictEqual(tableReads,0);
   const job=sharer.share({runId:100,stylizedFonts:true});assert.match((await sharer.share({runId:100,stylizedFonts:true})).error,/Another/);
-  let result=await job;assert.ok(result.ok,result.error);assert.strictEqual(writes,1);
+  let result=await job;assert.ok(result.ok,result.error);assert.strictEqual(writes,1);assert.strictEqual(tableReads,1);
   const png=captured.toPNG();assert.strictEqual(png.readUInt32BE(16),1600,'clipboard PNG physical width independent of DPI');assert.ok(png.readUInt32BE(20)>=1000);
   assert.strictEqual(JSON.stringify(fixture),before,'sharing never changes saved data');
+  currentTables={...tables,ITEM_NAMES:{...tables.ITEM_NAMES,one:'Refreshed fixture'}};
   let largeCapture;
-  const largeSharer=new RunSharer({findRun:()=>large,cacheDir:()=>dir,writeImage:image=>{largeCapture=image;}});
+  const largeSharer=new RunSharer({findRun:()=>large,tables:cachedTables,writeImage:image=>{largeCapture=image;}});
   result=await largeSharer.share({runId:100,stylizedFonts:true});assert.ok(result.ok,result.error);
   assert.strictEqual(largeCapture.toPNG().readUInt32BE(16),1600);assert.ok(largeCapture.toPNG().readUInt32BE(20)>1000,'complete tall image reaches the clipboard writer');
 
-  const failing=new RunSharer({findRun:()=>fixture,cacheDir:()=>dir,writeImage:()=>{throw Error('Fixture clipboard failure');}});
+  assert.strictEqual(tableReads,2,'each export reads the current cache once');
+  currentTables=null;
+  assert.ok((await sharer.share({runId:100,stylizedFonts:false})).ok,'missing cached tables still export');
+  const failing=new RunSharer({findRun:()=>fixture,tables:cachedTables,writeImage:()=>{throw Error('Fixture clipboard failure');}});
   assert.match((await failing.share({runId:100,stylizedFonts:true})).error,/Fixture clipboard failure/);
-  const timeout=new RunSharer({findRun:()=>fixture,cacheDir:()=>dir,timeoutMs:1,writeImage:()=>{throw Error('Should never write after timeout');}});
+  const timeout=new RunSharer({findRun:()=>fixture,tables:cachedTables,timeoutMs:1,writeImage:()=>{throw Error('Should never write after timeout');}});
   assert.match((await timeout.share({runId:100,stylizedFonts:true})).error,/timed out/);
   // Real sandboxed preload bridge and button feedback, including in-flight polls.
   let release;

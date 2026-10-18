@@ -2,6 +2,12 @@
 (function (root) {
   'use strict';
   const DASH = '—';
+  const ITEM_DROP = new Set(['of', 'the', 'and', 'a']);
+  function itemKey(name) {
+    return String(name).replace(/’/g, "'").toLowerCase()
+      .replace(/'s\b/g, '').replace(/[^a-z0-9]+/g, ' ')
+      .trim().split(' ').filter(word => word && !ITEM_DROP.has(word)).join('');
+  }
   function stageName(name) {
     if (typeof name !== 'string') return '';
     return /^baba yaga(?: map)?$/i.test(name.trim()) ? 'Epilogue' : name;
@@ -34,6 +40,6 @@
       glyph.append(source); node.append(glyph);
     }
   }
-  const api = {stageName, heroCode, heroName, formatStat, formatPlaytime, setName};
+  const api = {itemKey, stageName, heroCode, heroName, formatStat, formatPlaytime, setName};
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RunPresentation = Object.freeze(api);
 })(globalThis);

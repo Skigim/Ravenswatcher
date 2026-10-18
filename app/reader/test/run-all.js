@@ -6,6 +6,7 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const SUITES = [
+  ['test-review-fixes', () => require('./test-review-fixes').main()],
   ['test-readonly', () => require('./test-readonly').main()],
   ['test-value-types', () => require('./test-value-types').main()],
   ['test-rtti-pefile', () => require('./test-rtti-pefile').main()],

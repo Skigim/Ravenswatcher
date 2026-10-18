@@ -39,7 +39,9 @@ async function testDeliberateCloseDoesNotSetFatal() {
   const reader = new Reader(proc.pid);
   const workerExited = new Promise(res => reader.worker.once('exit', res));
 
-  reader.close();
+  const closing = reader.close();
+  check("repeated close shares its completion", reader.close() === closing);
+  await closing;
   await workerExited;
 
   check('a deliberate close() does not set fatal', reader.fatal === null,
@@ -75,7 +77,9 @@ async function testWorkerExitDoesNotClobberSpecificFatal() {
     isSpecificRttiMessage,
     reader.fatal ? `fatal=${reader.fatal}` : 'fatal is null');
 
-  reader.close();
+  const closing = reader.close();
+  check("repeated close shares its completion", reader.close() === closing);
+  await closing;
   proc.kill();
   await dead;
 }

@@ -1,13 +1,12 @@
 // A saved run rendered in an isolated offscreen page; clipboard changes only
 // after a complete, validated capture. No game reads or asset decoding here.
 import { BrowserWindow, clipboard, type NativeImage } from 'electron';
-import * as fs from 'fs';
 import * as path from 'path';
 import type { StoredRun } from './history';
 
 export interface ShareOptions {
   findRun(id: number): StoredRun | undefined;
-  cacheDir(): string | null;
+  tables(): unknown;
   writeImage?(image: NativeImage): void;
   timeoutMs?: number;
 }
@@ -28,12 +27,7 @@ export class RunSharer {
     try {
       // Snapshot before awaiting so history refresh/deletion cannot change it.
       const snapshot = JSON.parse(JSON.stringify(run)) as StoredRun;
-      let tables: unknown = {};
-      const cacheDir = this.options.cacheDir();
-      if (cacheDir) {
-        try { tables = JSON.parse(fs.readFileSync(path.join(cacheDir,'tables.json'),'utf8')); }
-        catch { /* names and placeholder art still make a useful share */ }
-      }
+      const tables = this.options.tables() ?? {};
       win = new BrowserWindow({
         width:1602,height:1002,useContentSize:true,show:false,
         webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,offscreen:true,backgroundThrottling:false},

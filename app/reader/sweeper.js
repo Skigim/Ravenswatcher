@@ -13,6 +13,7 @@
 
 const { parentPort, workerData, isMainThread } = require('worker_threads');
 const { openProcess } = require('./win32');
+const { WorkerControl } = require('./worker-control');
 const rtti = require('./rtti');
 const values = require('./values');
 const placement = require('./placement');
@@ -193,13 +194,15 @@ function resolveTracked(index) {
 
 async function main(pid, base) {
   const proc = openProcess(pid);
+  const control = new WorkerControl(parentPort);
+  if (parentPort) parentPort.unref();
+  try {
 
   const rvas = rtti.resolveVtableRvas(proc, base);
   const settingsVt = rvas.oCGlobalEntityValueSettings != null
     ? base + rvas.oCGlobalEntityValueSettings : null;
   const unionVt = rvas.oCEntityValueUnion != null ? base + rvas.oCEntityValueUnion : null;
   if (settingsVt === null || unionVt === null) {
-    proc.close();
     return fail('could not resolve RTTI vtables -- is the PID correct and the process still running?');
   }
 
@@ -234,8 +237,8 @@ async function main(pid, base) {
   // worker would loop forever scanning a dead handle. The check runs at the top
   // of each pass, before the expensive index build; on a dead process the
   // worker posts 'gone' and breaks out to close its handle and exit. Reader
-  // ends the worker any other time with terminate().
-  for (;;) {
+  // otherwise sends a cooperative stop message.
+  while (!control.stopped) {
     if (!proc.isAlive()) {
       if (parentPort) parentPort.postMessage({ type: 'gone' });
       break;
@@ -430,9 +433,12 @@ async function main(pid, base) {
       mapId: lastMapId,
       runReset,
     });
-    await new Promise(r => setTimeout(r, SWEEP_INTERVAL * 1000));
+    await control.wait(SWEEP_INTERVAL * 1000);
   }
-  proc.close();
+  } finally {
+    control.dispose();
+    proc.close();
+  }
 }
 
 module.exports = { mergeMapNames, heroRescanDue, fallbackHeroSource,

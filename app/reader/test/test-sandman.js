@@ -340,12 +340,14 @@ function testReaderIntegration() {
   let mockLevel = 3;
   dummyReader.pollValue = () => mockLevel;
   dummyReader._lastHeroLevel = null;
-  dummyReader.get('Hero Level');
-  check('pollValue records initial Hero Level', dummyReader._lastHeroLevel === 3);
+  dummyReader.updateTransitions(dummyReader.get('Hero Level'), 0);
+  check('transition update records initial Hero Level', dummyReader._lastHeroLevel === 3);
   dummyReader.sandmanData = [{ name: 'Item', price: 50, purchased: false }];
   mockLevel = 1;
   dummyReader.get('Hero Level');
-  check('level drop on Hero Level poll triggers clearRun and resets sandmanData',
+  check('Hero Level lookup leaves shop data intact', dummyReader.sandmanData !== null);
+  dummyReader.updateTransitions(mockLevel, 0);
+  check('level drop during transition update clears sandmanData',
     dummyReader.sandmanData === null && dummyReader._lastHeroLevel === 1);
 
   // Message contract tests on Reader instance

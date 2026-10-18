@@ -4,7 +4,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, deleteHistoryFile, HistoryDeletion } = require('../../history');
+const { DatabaseSync } = require('node:sqlite');
+const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, clearHistory, HistoryDeletion } = require('../../history');
 function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ravenswatcher-delete-'));
   try {
@@ -14,7 +15,7 @@ function main() {
     let clock = 1000, commits = 0;
     const manager = new HistoryDeletion(() => h, (scope, ids) => {
       commits++;
-      if (scope === 'all') deleteHistoryFile(file, h); else deleteRuns(file, h, ids);
+      if (scope === 'all') clearHistory(file, h); else deleteRuns(file, h, ids);
     }, () => clock);
     for (const invalid of [null, {}, { scope: 'wrong' }, { scope: 'single', ids: [1, 2] },
       { scope: 'selected', ids: [] }, { scope: 'selected', ids: [1, 1] },
@@ -68,13 +69,28 @@ function main() {
     manager.confirm(request.token); manager.confirm(request.token, 'DELETE 2');
     manager.confirm(request.token);
     assert.deepStrictEqual(loadHistory(file).runs.map(r => r.id), [3], 'bulk deletes exactly the selected records');
-    // The SQLite file disappears; unrelated files survive.
+    // A failed delete-all rolls back earlier row deletions and preserves memory.
+    appendRun(file, h, { v: 1, id: 7 });
+    let db = new DatabaseSync(file);
+    db.exec(`INSERT INTO runs (id, version, summary_json) VALUES (8, 1, '{"v":1,"id":999}');
+      CREATE TRIGGER reject_clear BEFORE DELETE ON runs WHEN OLD.id = 7
+      BEGIN SELECT RAISE(ABORT, 'fixture delete failure'); END;`);
+    db.close();
+    h.skipped = loadHistory(file).skipped;
+    assert.strictEqual(h.skipped, 1);
+    const beforeClear = JSON.stringify(h);
+    assert.throws(() => clearHistory(file, h), /fixture delete failure/);
+    assert.strictEqual(JSON.stringify(h), beforeClear);
+    assert.deepStrictEqual(loadHistory(file), h, 'disk and memory both survive rollback');
+    db = new DatabaseSync(file); db.exec('DROP TRIGGER reject_clear'); db.close();
+    deleteRuns(file, h, [7]);
+    // Delete-all retains the database; unrelated files survive.
     fs.writeFileSync(path.join(dir, 'settings.json'), 'keep');
     request = manager.prepare({ scope: 'all' });
     manager.confirm(request.token); manager.confirm(request.token, 'DELETE 1');
     assert.ok(fs.existsSync(file));
     manager.confirm(request.token);
-    assert.ok(!fs.existsSync(file));
+    assert.ok(fs.existsSync(file));
     assert.strictEqual(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'), 'keep');
     assert.deepStrictEqual(h, { runs: [], skipped: 0 });
     assert.deepStrictEqual(loadHistory(file), h, 'restart begins with empty history');
@@ -87,7 +103,7 @@ function main() {
     assert.throws(() => failing.confirm(request.token), /fixture failure/);
     assert.throws(() => failing.confirm(request.token), /expired/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  console.log('test-history-deletion: ok (confirmation counts, cancellation, stale reviews, persistence and file removal)');
+  console.log('test-history-deletion: ok (confirmation counts, cancellation, stale reviews, persistence and transactional clearing)');
   return 0;
 }
 module.exports = { main };

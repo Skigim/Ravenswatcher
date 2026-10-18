@@ -22,7 +22,9 @@ function main() {
     assert.strictEqual(appendRun(file, h, { ...a, result: 'victory' }), false);
     assert.strictEqual(appendRun(file, h, { id: 3 }), false);
     assert.strictEqual(appendRun(file, h, null), false);
+    const originalBytes = fs.readFileSync(file);
     assert.deepStrictEqual(loadHistory(file).runs, [a, b], 'full objects, quantities and melody states survive reopening');
+    assert.deepStrictEqual(fs.readFileSync(file), originalBytes, 'loading an initialized database does not rewrite its schema/version');
     const freshMemory = { runs: [], skipped: 0 };
     assert.strictEqual(appendRun(file, freshMemory, a), false, 'the database enforces IDs independently of the memory list');
     const db = new DatabaseSync(file);

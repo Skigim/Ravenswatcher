@@ -3,7 +3,7 @@
 // This module owns the child process and nothing else: spawning it in either
 // layout, parsing its newline-delimited JSON stdout, keeping a stderr tail
 // for the down message, noticing when it goes away, restarting it with
-// backoff, and tree-killing it on the way out. It deliberately does NOT
+// backoff, and draining it on shutdown with a bounded tree-kill fallback. It deliberately does NOT
 // require('electron') and does NOT know any IPC channel name -- it hands
 // parsed frames and down-notices to the two callbacks its caller supplies,
 // and main.js decides what to do with them (which window, which channel).
@@ -19,6 +19,7 @@ const path = require('path');
 // sidecar proves it's alive by writing anything to stdout.
 const BASE_RETRY_MS = 2000;
 const MAX_RETRY_MS = 30000;
+const SHUTDOWN_GRACE_MS = 30000;
 
 // The reader exits with this when the game is simply not there -- it has not
 // been started yet, or it was running and the player closed it. That is not a
@@ -42,15 +43,14 @@ const STDERR_TAIL_LIMIT = 4000;
 // surviving the app that owns it, still attached to the game, is bad enough
 // to guard against with no known path to it.
 //
-// execFileSync, not spawn(): this is called from before-quit,
-// uncaughtException, SIGINT, and SIGTERM, each of which calls app.exit()
-// immediately afterward, and a fire-and-forget spawn() would race it.
+// The fallback also serves fatal app exits, where an asynchronous kill could race exit.
 function killSidecarTree(proc) {
   if (!proc || proc.pid == null) return;
   try {
     execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
       timeout: 2000,
       stdio: 'ignore',
+      windowsHide: true,
     });
   } catch (err) {
     // Non-zero exit (process already gone), timeout, or taskkill missing
@@ -84,7 +84,7 @@ function killSidecarTree(proc) {
 //   or never started at all) and a retry has been scheduled.
 // Both are called with no `this`, may be omitted, and are the only way
 // anything leaves this module.
-function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, readerEntry }) {
+function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, readerEntry, shutdownGraceMs = SHUTDOWN_GRACE_MS }) {
   // Two layouts, one spawn. The reader is plain JS running on the Node
   // runtime Electron already ships, so there is no second interpreter to
   // locate: process.execPath IS the command in both layouts, with
@@ -108,11 +108,14 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
   let stdoutBuffer = '';
   let stderrTail = '';
   let stopped = false;         // true once stop() has been called; suppresses retry
-  let sidecarStopping = false; // guards stop() against double-invocation
+  let stopPromise = null;
+  let shutdownTimer = null;
   let retryTimer = null;
   let retryAttempt = 0;
 
   function start() {
+    if (proc) throw new Error("Wait for the previous reader to close before restarting.");
+    stopPromise = null;
     // Reset stopped and cancel any pending retry timer before spawning.
     // If stop() was called earlier, stopped must be cleared or the next
     // exit handler treats any exit as intentional and never reconnects.
@@ -124,7 +127,6 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    sidecarStopping = false;
     stderrTail = '';
     stdoutBuffer = '';
 
@@ -135,8 +137,8 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     // every handle a terminated process owned, including this pipe's write
     // end, so the sidecar's blocking stdin read in stdio.js returns EOF and
     // it exits itself. This is a backstop, not the primary mechanism --
-    // every path where our own code *does* run still goes through
-    // killSidecarTree() below.
+    // normal shutdown closes this pipe and waits for the reader to drain.
+    // A deadline or fatal error falls back to killSidecarTree().
     //
     // cwd MUST be a real directory on disk. Packaged, READER_ENTRY lives
     // inside app.asar, and its dirname is therefore a path no process can
@@ -177,6 +179,7 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     // forever on index.html's static markup and looks like a healthy app
     // waiting on its first sweep. 'close' fires for
     // both that case and a normal exit, and carries the same (code, signal).
+    proc.stdin.on('error', () => {}); // EOF may race a child that already exited.
     proc.on('close', handleSidecarExit);
   }
 
@@ -185,6 +188,7 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
   // two 'data' events, or one chunk can carry several lines. Buffer text
   // until a newline shows up and only ever parse complete lines.
   function handleSidecarStdout(chunk) {
+    if (stopped) return;
     // Any stdout at all is proof the sidecar attached successfully. Forget
     // the backoff history so a later, unrelated failure starts counting from
     // BASE_RETRY_MS again instead of picking up where a resolved problem left
@@ -233,7 +237,8 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
   function handleSidecarExit(code, signal) {
     console.log(`[sidecar] exited (code=${code}, signal=${signal})`);
     proc = null;
-    sidecarStopping = false;
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    shutdownTimer = null;
     if (stopped) return; // the app asked for this; don't reconnect
 
     // "Waiting for the game" is a steady poll at the base delay, not a fault
@@ -270,12 +275,30 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    if (!proc || sidecarStopping) return;
-    sidecarStopping = true;
+    if (stopPromise) return stopPromise;
+    if (!proc) return (stopPromise = Promise.resolve());
+    const target = proc;
+    stopPromise = new Promise(resolve => {
+      target.once('close', () => resolve());
+      shutdownTimer = setTimeout(() => {
+        console.error('[sidecar] graceful shutdown timed out; stopping reader process');
+        killSidecarTree(target);
+      }, shutdownGraceMs);
+      target.stdin.end();
+    });
+    return stopPromise;
+  }
+
+  function forceStop() {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    shutdownTimer = null;
     killSidecarTree(proc);
   }
 
-  return { start, stop };
+  return { start, stop, forceStop };
 }
 
 module.exports = {
@@ -284,5 +307,6 @@ module.exports = {
   EXIT_NO_GAME,
   BASE_RETRY_MS,
   MAX_RETRY_MS,
+  SHUTDOWN_GRACE_MS,
   STDERR_TAIL_LIMIT,
 };

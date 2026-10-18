@@ -57,7 +57,8 @@ const ICON_CHOICE: Record<string, string> = {
   Curse_Stack_Shard_Quest: 'Icon_Devil_Pocket_Full.png',
 };
 
-const DROP = new Set(['of', 'the', 'and', 'a']);
+import { itemKey } from '../web/run-presentation';
+export { itemKey } from '../web/run-presentation';
 const TEXT_KEY = /(?<![A-Za-z0-9_])[A-Za-z0-9_ ]+?_(Name|Description)(?![A-Za-z0-9_])/g;
 const ICON = /(?:Icon|UI)_[A-Za-z0-9_]+\.png/g;
 const ENTITY_REF = /([A-Za-z0-9_]+)\.entity\.ot/g;
@@ -87,16 +88,6 @@ export function listCooked(cookingDir: string, decodedRelDir: string): string[] 
     throw new Error(`${decodedRelDir}: cannot list ${p} (${(e as Error).message})`);
   }
   return names.map(decodeName);
-}
-
-/** Mirror of itemKey() in app/web/app.js. Change both or neither. */
-export function itemKey(name: string): string {
-  return String(name).replace(/’/g, "'").toLowerCase()
-    .replace(/'s\b/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim().split(' ')
-    .filter((w) => w && !DROP.has(w))
-    .join('');
 }
 
 export function clean(desc: string): string {

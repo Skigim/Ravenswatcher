@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* Delete-all clears History atomically; failed deletions leave saved records intact.
+* Reader transitions clear Live data before rendering the next frame, without getter side effects.
+* Reader workers shut down cooperatively, and reopening during shutdown queues one relaunch.
+* End-of-run discovery shares one memory scan, and Share Run reuses cached item tables.
+* Packaged application code remains readable, with development files and decoded game content excluded.
+
 * Ravenswatcher is now fully open source under the MIT license. The complete app source has moved into the [Ravenswatcher repository](https://github.com/Skigim/Ravenswatcher) alongside its releases.
 * Share Run copies a complete build image to the clipboard, including hero, score, melodies, talents, object stacks and damage.
 * The final stage is displayed as Epilogue across Live, History and shared images.

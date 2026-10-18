@@ -460,6 +460,7 @@ export interface Placement {
 /** The live Reader, structurally. reader.js is still JavaScript. */
 export interface LiveSource {
   get(name: string): number | null;
+  updateTransitions?(heroLevel: number | null, mapId: number | null): void;
   maps(): Record<number, string>;
   placement?(): Placement | null;
   melodies?(): MelodySlotView[] | null;
@@ -638,7 +639,10 @@ export function readState(src: LiveSource | null, opts: ReadStateOptions = {}): 
     // A null `values` means live mode, which needs a source to read.
     if (src === null) throw new Error('readState: no source and no fixture values');
     const live = src;
-    get = (name) => reading(live.get(name));
+    const heroLevel = live.get(HERO_LEVEL);
+    const currentMapId = live.get(CURRENT_MAP_ID);
+    live.updateTransitions?.(heroLevel, currentMapId);
+    get = (name) => reading(name === HERO_LEVEL ? heroLevel : name === CURRENT_MAP_ID ? currentMapId : live.get(name));
     maps = live.maps();
     placement = live.placement ? live.placement() : null;
     melodies = live.melodies ? live.melodies() : null;

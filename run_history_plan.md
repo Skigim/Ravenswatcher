@@ -206,11 +206,11 @@ remains separate from run records.
   built-in runtime is used; there is no new native dependency.
 - SQLite is the only supported history format; no legacy import is needed.
 - Individual record deletion requires two explicit confirmations. Selected
-  records and the entire history file require three, including a typed count.
+  records and delete-all require three, including a typed count.
   Confirmation tokens expire after five minutes and are single use. A changed
   delete-all selection requires a new review. Cancelling never deletes data.
-- Delete-all removes only the SQLite history file and its SQLite sidecars.
-  Settings and decoded assets remain separate. The next run creates a fresh file.
+- Delete-all deletes every row in one SQLite transaction, retaining the empty database.
+  Memory is cleared only after commit. Settings and decoded assets remain separate.
 - New captures add `object_counts`, uint16 quantities parallel to `objects`,
   and a snapshot of the last resolved in-run `melodies` payload. Unknown
   counts or melodies are null; older rows may omit them. No old quantity

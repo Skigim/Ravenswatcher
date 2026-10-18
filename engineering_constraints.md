@@ -33,8 +33,10 @@ app/web/         the page — plain HTML/CSS/JS, no build step, no framework
 
 A 1280x800 `BrowserWindow`, not an overlay. `contextIsolation` on,
 `nodeIntegration` off, sandboxed preload. Single-instance lock; a second
-launch focuses the first window. The sidecar is tree-killed on quit, and
-backstopped by a stdin dead-man's switch for hard external kills.
+launch focuses the first window. Normal quit closes the sidecar's stdin and awaits cooperative worker shutdown.
+A 30-second deadline falls back to killing the reader process tree; fatal main-process
+errors force-stop it immediately. A second launch during shutdown queues one relaunch
+after the reader exits. Stdin closure also handles a hard external kill of the parent.
 
 Memory access is read-only throughout:
 `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`, never `VM_WRITE`, no

@@ -47,6 +47,9 @@
 /app/reader/runs-worker.js
 /app/reader/runs-worker.js.map
 /app/reader/runs-worker.d.ts
+/app/reader/worker-control.js
+/app/reader/worker-control.js.map
+/app/reader/worker-control.d.ts
 /app/history.js
 /app/history.js.map
 /app/history.d.ts

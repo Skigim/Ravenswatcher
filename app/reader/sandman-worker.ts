@@ -27,6 +27,7 @@ import { parentPort, workerData, isMainThread } from 'worker_threads';
 import * as sandman from './sandman';
 import type { SandmanOffer, SandmanStatus, SandmanSource, ResolvedVtables } from './sandman';
 import { pollBinding } from './values';
+import { WorkerControl } from './worker-control';
 
 // win32.js is still JavaScript; require it directly.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -68,10 +69,12 @@ export function pollGate(proc: SandmanSource, gate: GateBinding | null): boolean
 }
 
 export async function runWorker(pid: number, base: number): Promise<void> {
+  const control = new WorkerControl(parentPort);
   let proc: WorkerProcess;
   try {
     proc = openProcess(pid) as WorkerProcess;
   } catch (e) {
+    control.dispose();
     return fail(e instanceof Error ? e.message : String(e));
   }
 
@@ -103,7 +106,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   }
 
   try {
-    for (;;) {
+    while (!control.stopped) {
       if (!proc.isAlive()) {
         if (parentPort) parentPort.postMessage({ type: 'gone', message: 'target process exited' });
         break;
@@ -131,7 +134,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
           }
         }
         if (!resolvedVtables) {
-          await new Promise(r => setTimeout(r, SANDMAN_POLL_MS));
+          await control.wait(SANDMAN_POLL_MS);
           continue;
         }
       }
@@ -166,7 +169,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
 
       if (cachedController === null) {
         // A tick with no valid controller posts nothing and falls through to the sleep.
-        await new Promise(r => setTimeout(r, SANDMAN_POLL_MS));
+        await control.wait(SANDMAN_POLL_MS);
         continue;
       }
 
@@ -220,9 +223,10 @@ export async function runWorker(pid: number, base: number): Promise<void> {
         }
       }
 
-      await new Promise(r => setTimeout(r, SANDMAN_POLL_MS));
+      await control.wait(SANDMAN_POLL_MS);
     }
   } finally {
+    control.dispose();
     proc.close();
   }
 }

@@ -10,6 +10,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createSidecar, BASE_RETRY_MS } = require('../../sidecar');
+const { createLifecycle } = require('../../lifecycle');
+const assert = require('assert');
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -58,7 +60,7 @@ async function testControlSingleStart() {
     }, 50);
   });
 
-  sidecar.stop();
+  await sidecar.stop();
 
   check('control: single start notices failure and calls onDown',
     downEvents.length === 1 && downEvents[0].attempt === 1,
@@ -119,16 +121,14 @@ async function testRestartAfterStopSupervises() {
   const firstDownCount = downEvents.length;
 
   // 2. Stop supervisor
-  sidecar.stop();
-  // stop() is synchronous in effect; this only lets an in-flight exit settle.
-  await new Promise(r => setTimeout(r, 100));
+  await sidecar.stop();
 
   // 3. Start supervisor again
   sidecar.start();
   // Wait for the second child exit, which is what the check below asserts.
   await waitFor(() => downEvents.length > firstDownCount);
 
-  sidecar.stop();
+  await sidecar.stop();
 
   check('start() after stop() resets stopped flag and supervises exit',
     downEvents.length > firstDownCount,
@@ -188,7 +188,7 @@ async function testManualStartCancelsPendingRetryTimer() {
     try { finalCount = parseInt(fs.readFileSync(STATE_FILE, 'utf8'), 10) || 0; } catch {}
   }
 
-  sidecar.stop();
+  await sidecar.stop();
 
   // If retryTimer was not cancelled, finalCount would be 3 (child 1 + manual start child 2 + timer child 3).
   // With cancellation, finalCount is exactly 2.
@@ -204,6 +204,28 @@ async function main() {
   await testControlSingleStart();
   await testRestartAfterStopSupervises();
   await testManualStartCancelsPendingRetryTimer();
+  for (const mode of ['stay', 'ignore-stop']) {
+    process.env.SIDECAR_TEST_MODE = mode;
+    let pid;
+    const sidecar = createSidecar({ repoRoot: path.join(__dirname, '../../..'),
+      readerEntry: STUB_PATH, shutdownGraceMs: 100,
+      onFrame: frame => { pid = frame.pid; },
+      onDown: () => { throw Error('intentional shutdown must not retry'); },
+    });
+    sidecar.start();
+    assert.ok(await waitFor(() => pid !== undefined));
+    const events = [];
+    const lifecycle = createLifecycle({ stop: () => {
+      const first = sidecar.stop();
+      assert.strictEqual(sidecar.stop(), first);
+      return first.then(() => events.push('closed'));
+    }, quit: () => events.push('quit'), relaunch: () => events.push('relaunch'), focus() {} });
+    const done = lifecycle.beforeQuit({ preventDefault() {} });
+    lifecycle.secondInstance(); lifecycle.secondInstance();
+    await done;
+    assert.deepStrictEqual(events, ['closed', 'relaunch', 'quit']);
+    assert.throws(() => process.kill(pid, 0), 'old process has exited before relaunch');
+  }
   return failures;
 }
 

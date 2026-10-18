@@ -73,7 +73,16 @@ function main(argv) {
   let reader = null;
   // Assigned below, once the poll timer exists; declared here because the
   // game-exited path inside tick() calls it.
-  let stop = () => {};
+  let stopping = null;
+  let stop = () => Promise.resolve();
+  const exitAfterStop = (code) => {
+    if (stopping) return stopping;
+    stopping = stop().then(() => process.exit(code), error => {
+      process.stderr.write(`reader shutdown failed: ${error.message}\n`);
+      process.exit(1);
+    });
+    return stopping;
+  };
   const { Reader } = require('./reader');
   try {
     reader = new Reader(pid);
@@ -88,6 +97,7 @@ function main(argv) {
     + ` -- first sweep takes a second or two, then every ${SWEEP_INTERVAL}s\n`);
 
   const tick = () => {
+    if (stopping) return;
     // The game closing does not end this process by itself. Our handle stays
     // valid -- that is what a handle is -- ReadProcessMemory simply starts
     // failing, and every failed read is reported as `null`, which is the same
@@ -99,8 +109,8 @@ function main(argv) {
     // now.
     if (reader && !reader.alive()) {
       process.stderr.write(`${PROCESS_NAME} has exited -- waiting for the game to start again\n`);
-      stop();
-      process.exit(EXIT_NO_GAME);
+      void exitAfterStop(EXIT_NO_GAME);
+      return;
     }
 
     let line;
@@ -126,11 +136,14 @@ function main(argv) {
   // tick() -- which runs before setInterval below -- can still stop cleanly
   // if it finds the game already gone.
   let timer = null;
-  stop = () => { if (timer) clearInterval(timer); if (reader) reader.close(); };
+  stop = () => {
+    if (timer) clearInterval(timer);
+    return reader ? reader.close() : Promise.resolve();
+  };
 
   reader.onSandmanChange = () => {
     tick();
-    if (timer) {
+    if (timer && !stopping) {
       clearInterval(timer);
       timer = setInterval(tick, POLL_MS);
     }
@@ -138,16 +151,16 @@ function main(argv) {
   reader.onRunSummary = reader.onSandmanChange;
 
   tick();
-  timer = setInterval(tick, POLL_MS);
-  process.on('SIGINT', () => { stop(); process.exit(0); });
-  process.stdout.on('error', () => { stop(); process.exit(0); });
+  if (!stopping) timer = setInterval(tick, POLL_MS);
+  process.on('SIGINT', () => { void exitAfterStop(0); });
+  process.on('SIGTERM', () => { void exitAfterStop(0); });
+  process.stdout.on('error', () => { void exitAfterStop(0); });
 
   let dead = false;
   armDeadMansSwitch(() => {
     if (dead) return;   // end/close/error can all fire for one disappearance
     dead = true;
-    stop();
-    process.exit(0);
+    void exitAfterStop(0);
   });
 }
 

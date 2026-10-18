@@ -4,26 +4,14 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
+const { itemKey } = require('../../web/run-presentation');
 const { itemKey: runtimeKey } = require('../../assets/tables');
 const { readManifest } = require('../../assets/build');
 
 const WEB = path.join(__dirname, '..', '..', 'web');
 
-/** itemKey() as app.js defines it, lifted out of the page without loading it. */
-function loadItemKey() {
-  const src = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
-  const drop = /const ICON_DROP = new Set\(\[[^\]]*\]\);/.exec(src);
-  const fn = /function itemKey\(name\) \{[\s\S]*?\n\}/.exec(src);
-  assert.ok(drop && fn, 'app.js no longer defines ICON_DROP and itemKey as expected');
-  const ctx = vm.createContext({});
-  vm.runInContext(`${drop[0]}\n${fn[0]}\nthis.itemKey = itemKey;`, ctx, { filename: 'app.js' });
-  return ctx.itemKey;
-}
-
 function main() {
   const { ITEM_TEXT, SHOP_ICONS, ITEM_NAMES } = require('./fixtures/item-tables');
-  const itemKey = loadItemKey();
 
   // The Python side keyed ITEM_NAMES; the JS side must reach the same key
   // from the same display name, or a live offer misses both tables.

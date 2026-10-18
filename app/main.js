@@ -26,10 +26,11 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { Worker } = require('worker_threads');
 const { createSidecar } = require('./sidecar');
+const { createLifecycle } = require('./lifecycle');
 const { CACHE_DIR_NAME } = require('./assets/build');
 const { checkForUpdate } = require('./update');
 const { RunSharer } = require('./share');
-const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, deleteHistoryFile, HistoryDeletion } = require('./history');
+const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, clearHistory, HistoryDeletion } = require('./history');
 
 // Windows groups taskbar buttons by AppUserModelID, and a pinned shortcut
 // carries the ID of whatever created it. Electron derives a default ID from
@@ -146,7 +147,7 @@ function sendHistory() {
 const historyDeletion = new HistoryDeletion(() => history, (scope, ids) => {
   if (HISTORY_PATH === null) throw new Error('History is unavailable.');
   try {
-    if (scope === 'all') deleteHistoryFile(HISTORY_PATH, history);
+    if (scope === 'all') clearHistory(HISTORY_PATH, history);
     else deleteRuns(HISTORY_PATH, history, ids);
   } finally { sendHistory(); }
 });
@@ -158,7 +159,8 @@ function historyRequest(event, action) {
   try { return { ok: true, ...action() }; }
   catch (error) { return { ok: false, error: error.message }; }
 }
-const runSharer = new RunSharer({findRun:id=>history.runs.find(run=>run.id===id),cacheDir:()=>CACHE_DIR});
+let cachedTables = {};
+const runSharer = new RunSharer({findRun:id=>history.runs.find(run=>run.id===id),tables:()=>cachedTables});
 ipcMain.handle('readout:share-run', async (event,input) => {
   const allowed = historyRequest(event,()=>({allowed:true}));
   if(!allowed.ok)return allowed;
@@ -233,7 +235,8 @@ function maybeBuildAssets(frame) {
       console.error('[main] icons and item text not decoded:', msg.error);
       return;
     }
-    sendToRenderer(ASSETS_CHANNEL, msg.tables);
+    cachedTables = msg.tables;
+    sendToRenderer(ASSETS_CHANNEL, cachedTables);
     console.log(`[main] icons and item text decoded from ${frame.install_dir}`);
   });
   worker.on('error', (err) => {
@@ -245,7 +248,8 @@ function sendCachedTables() {
   const file = path.join(CACHE_DIR, 'tables.json');
   if (!fs.existsSync(file)) return;
   try {
-    sendToRenderer(ASSETS_CHANNEL, JSON.parse(fs.readFileSync(file, 'utf8')));
+    cachedTables = JSON.parse(fs.readFileSync(file, 'utf8'));
+    sendToRenderer(ASSETS_CHANNEL, cachedTables);
   } catch (err) {
     console.error('[main] cached item tables unreadable:', err.message);
   }
@@ -311,6 +315,7 @@ async function createWindow() {
     flushPendingSends();
     sendUpdate();
     sendHistory();
+    sendToRenderer(ASSETS_CHANNEL, cachedTables);
   });
 
   // loadFile() resolves relative paths against the app root (app/), and
@@ -328,13 +333,20 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    console.log('[main] second-instance: focusing existing window');
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+  const lifecycle = createLifecycle({
+    stop: () => sidecar.stop(),
+    quit: () => app.quit(),
+    relaunch: () => app.relaunch(),
+    onError: error => { console.error('[main] shutdown failed:', error); sidecar.forceStop(); },
+    focus: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+    },
   });
+  app.on('second-instance', () => lifecycle.secondInstance());
+  app.on('before-quit', event => { void lifecycle.beforeQuit(event); });
 
   app.whenReady().then(() => {
     CACHE_DIR = path.join(app.getPath('userData'), CACHE_DIR_NAME);
@@ -359,39 +371,16 @@ if (!gotLock) {
     });
   });
 
-  app.on('window-all-closed', () => {
-    sidecar.stop();
-    app.quit();
-  });
+  app.on('window-all-closed', () => app.quit());
 
-  app.on('before-quit', () => {
-    sidecar.stop();
-  });
-
-  // Belt-and-suspenders for exit paths that don't route through the normal
-  // Electron quit sequence at all: app.exit() explicitly skips
-  // before-quit/will-quit, so a crash in main-process code (an uncaught
-  // exception) or a terminal Ctrl+C during `npm start` would otherwise have
-  // no chance to kill the sidecar before the process itself disappears.
-  // None of these four handlers can run at all against a hard external kill
-  // (Task Manager "End Task", `taskkill /F`) -- no code inside a
-  // TerminateProcess'd process gets a chance to execute, on any platform.
-  // That case is covered instead by the stdin-pipe dead-man's switch set up
-  // in sidecar.js's start(): the OS itself closes the pipe when this process
-  // is torn down, with no JS involved. See the report for what was verified.
+  // Fatal errors cannot safely wait for normal app lifecycle cleanup. A hard
+  // external kill is covered by the reader's stdin dead-man's switch.
   process.on('uncaughtException', (err) => {
     console.error('[main] uncaught exception:', err);
-    sidecar.stop();
+    sidecar.forceStop();
     app.exit(1);
   });
 
-  process.on('SIGINT', () => {
-    sidecar.stop();
-    app.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    sidecar.stop();
-    app.exit(0);
-  });
+  process.on('SIGINT', () => app.quit());
+  process.on('SIGTERM', () => app.quit());
 }

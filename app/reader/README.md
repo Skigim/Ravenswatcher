@@ -52,7 +52,8 @@ runs-worker.ts the end-of-run capture on its own worker thread
 state.ts       the output contract
 sweeper.js     the discovery sweep (values, placement, melodies), on a
                worker thread
-reader.js      attach + poll
+worker-control.ts stop messages and interruptible waits
+reader.js      attach + poll + asynchronous cooperative close
 stdio.js       one JSON object per line on stdout
 ```
 
@@ -111,6 +112,19 @@ comparing the live id against the answer's id cannot see a restart onto the
 same map. Do not reintroduce a cadence, a retry budget, or a level-based
 edge here; each was tried, and each was compensating for that missed
 transition rather than fixing it.
+
+## Shutdown and transitions
+
+`Reader.get()` only reads values. `readState()` reads hero level and map id once,
+applies `updateTransitions()`, then snapshots the channel data. Both reset triggers
+retain the same Live clear behavior; chapter changes preserve melodies and History
+retains its separate last-in-run snapshot.
+
+`Reader.close()` returns an idempotent promise. Workers finish synchronous work,
+process a stop message, close their own read-only handle, and exit. The stdio process
+awaits that promise before exiting. Normal supervisor shutdown closes stdin and waits;
+a 30-second fallback kills the whole reader process rather than terminating individual
+workers in the middle of native calls.
 
 ## Reader inputs
 

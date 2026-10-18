@@ -43,6 +43,11 @@ function main() {
       JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'value_types.json'), 'utf8')), 'bundled type metadata differs');
     for (const file of ['share.js','web/share.html','web/share.js','web/share.css','web/typography.css','web/run-presentation.js']) assert.ok(fs.existsSync(path.join(stage,file)), 'share runtime missing: '+file);
     assert.ok(fs.existsSync(path.join(stage, 'update.js')), 'update.js missing from stage');
+    for (const file of ['lifecycle.js', 'reader/worker-control.js']) {
+      assert.ok(fs.existsSync(path.join(stage, file)), 'lifecycle runtime missing: ' + file);
+    }
+    assert.strictEqual(fs.readFileSync(path.join(stage, 'web', 'share.js'), 'utf8'),
+      fs.readFileSync(path.join(appDir, 'web', 'share.js'), 'utf8'), 'staging preserves readable runtime source');
   } finally {
     fs.rmSync(stage, { recursive: true, force: true });
   }

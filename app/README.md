@@ -57,6 +57,10 @@ can display names without art or descriptions. `web/assets/SOURCES.tsv`
 maps cache filenames to game resource paths. The bundled Archivo font
 retains its SIL Open Font License.
 
+Staging copies readable runtime code without obfuscation. It excludes tests,
+benchmarks, TypeScript sources and maps, and verifies that decoded game assets do
+not ship. Native Koffi files and the bundled fonts and license notices remain included.
+
 ## Tests
 
 `npm test` builds and runs reader and Electron renderer suites with

@@ -2,8 +2,8 @@
 // The run-end channel, on its own worker thread. See runs.ts for what is read
 // and why the score waits.
 //
-// A worker of its own because the edge needs two heap scans (the skill
-// definitions for talent names, the score page) and the score then needs
+// A worker of its own because the edge needs heap discovery for talents and
+// the score page, and the score then needs
 // polling for up to a minute. The discovery sweep's thread has neither the
 // time nor the cadence, and the Sandman thread polls at 100 ms for a reason.
 //
@@ -15,6 +15,7 @@ import { parentPort, workerData, isMainThread } from 'worker_threads';
 import * as runs from './runs';
 import type { ClassOf, RunResult, RunSummary } from './runs';
 import { pollBinding } from './values';
+import { WorkerControl } from './worker-control';
 import type { ByteSource } from './pe';
 import type { ScanSource } from './scan';
 import type { MelodySlotView } from './melodies';
@@ -52,8 +53,6 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
 /** Vtable -> class name for every class the channel checks, or null if the record class is missing. */
 function resolveClasses(proc: WorkerProcess, base: number): Map<number, string> | null {
   const byVt = new Map<number, string>();
@@ -72,11 +71,25 @@ interface Pending {
   lastScan: number;
 }
 
+/** Find all three end-screen classes in one heap pass, preserving class ownership. */
+export function discoverRunEnd(proc: ScanSource, classes: ReadonlyMap<number, string>, scan = scanPointers): {
+  settings: number[]; runtime: number[]; score: number[];
+} {
+  const names: string[] = [runs.RUN_CLASSES.settings, runs.RUN_CLASSES.runtime, runs.RUN_CLASSES.score];
+  const targets = [...classes].filter(([, name]) => names.includes(name)).map(([vt]) => vt);
+  const hits = targets.length ? scan(proc, targets, { writableOnly: true }) : new Map<number, unknown[]>();
+  const addresses = (name: string): number[] => [...classes]
+    .filter(([, found]) => found === name).flatMap(([vt]) => (hits.get(vt) ?? []) as number[]);
+  return { settings: addresses(runs.RUN_CLASSES.settings), runtime: addresses(runs.RUN_CLASSES.runtime), score: addresses(runs.RUN_CLASSES.score) };
+}
+
 export async function runWorker(pid: number, base: number): Promise<void> {
+  const control = new WorkerControl(parentPort);
   let proc: WorkerProcess;
   try {
     proc = openProcess(pid) as WorkerProcess;
   } catch (e) {
+    control.dispose();
     return post({ type: 'fatal', message: message(e) });
   }
 
@@ -140,8 +153,9 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   let prevFlags: { defeat: number | null; victory: number | null } | null = null;
   let pending: Pending | null = null;
 
-  const readCapture = (result: RunResult): RunSummary | null => {
-    const attempt = (): RunSummary | string => {
+  const readCapture = (result: RunResult): { summary: RunSummary; controllers: number[] } | null => {
+    let discovery: ReturnType<typeof discoverRunEnd> | null = null;
+    const attempt = (): { summary: RunSummary; controllers: number[] } | string => {
       const problems: string[] = [];
       for (const record of records) {
         try {
@@ -150,20 +164,21 @@ export async function runWorker(pid: number, base: number): Promise<void> {
           if (problem) { problems.push(problem); continue; }
           let talents: runs.Talent[] | null = null;
           try {
+            discovery ??= discoverRunEnd(proc, byVt ?? new Map());
             talents = runs.retainTalentDescriptions(runs.readTalents(proc, record, classOf,
-              scan(runs.RUN_CLASSES.settings), scan(runs.RUN_CLASSES.runtime)), lastTalents);
+              discovery.settings, discovery.runtime), lastTalents);
           } catch (e) {
             talents = lastTalents === null ? null : lastTalents.map(t => ({ ...t }));
             post({ type: 'diagnostic', message: 'run-end talent read failed' + (talents === null ? ': ' : '; using last in-run snapshot: ') + message(e) });
           }
           const difficulty = value(runs.GAME_DIFFICULTY);
           const chapter = value(runs.CURRENT_CHAPTER);
-          return runs.buildSummary({
+          return { summary: runs.buildSummary({
             id: Date.now(), result,
             difficulty: difficulty ?? lastDifficulty,
             map: lastMap,
             chapter: chapter ?? lastChapter,
-          }, r, talents, melodySnapshot.melodies, lastHeroStats, lastHeroStatsAt);
+          }, r, talents, melodySnapshot.melodies, lastHeroStats, lastHeroStatsAt), controllers: discovery?.score ?? [] };
         } catch (e) {
           problems.push(message(e));
         }
@@ -181,8 +196,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
     return got;
   };
 
-  const startScore = (summary: RunSummary): Pending => {
-    const controllers = scan(runs.RUN_CLASSES.score);
+  const startScore = (summary: RunSummary, controllers: number[]): Pending => {
     const baseline = new Set<number>();
     for (const c of controllers) {
       const buf = runs.detailBuffer(proc, c);
@@ -214,7 +228,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   };
 
   try {
-    for (;;) {
+    while (!control.stopped) {
       if (!proc.isAlive()) {
         post({ type: 'gone', message: 'target process exited' });
         break;
@@ -227,7 +241,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
           try { byVt = resolveClasses(proc, base); } catch { byVt = null; }
           if (!byVt) post({ type: 'diagnostic', message: 'could not resolve run record RTTI; run history is off' });
         }
-        if (!byVt) { await sleep(RUNS_POLL_MS); continue; }
+        if (!byVt) { await control.wait(RUNS_POLL_MS); continue; }
       }
 
       const flags = { defeat: value(runs.DEFEAT_FLAG), victory: value(runs.VICTORY_FLAG) };
@@ -290,8 +304,8 @@ export async function runWorker(pid: number, base: number): Promise<void> {
       if (flags.defeat !== null && flags.victory !== null) prevFlags = flags;
 
       if (edge && !pending) {
-        const summary = readCapture(edge);
-        if (summary) pending = startScore(summary);
+        const captured = readCapture(edge);
+        if (captured) pending = startScore(captured.summary, captured.controllers);
       }
 
       if (pending) {
@@ -305,9 +319,10 @@ export async function runWorker(pid: number, base: number): Promise<void> {
         }
       }
 
-      await sleep(RUNS_POLL_MS);
+      await control.wait(RUNS_POLL_MS);
     }
   } finally {
+    control.dispose();
     proc.close();
   }
 }

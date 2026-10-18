@@ -12,7 +12,7 @@ if (typeof electron === 'string') {
   process.exit(res.status === null ? 1 : res.status);
 }
 const { app, BrowserWindow, ipcMain } = electron;
-const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, deleteHistoryFile, HistoryDeletion } = require('../../history');
+const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, clearHistory, HistoryDeletion } = require('../../history');
 const dir = process.env.RW_DELETE_TEST_DIR;
 if (!dir || path.dirname(dir) !== os.tmpdir() || !path.basename(dir).startsWith('rw-delete-ui-')) throw new Error('Missing isolated test directory');
 app.setPath('userData', path.join(dir, 'profile'));
@@ -24,7 +24,7 @@ let win;
 let calls = 0;
 const manager = new HistoryDeletion(() => history, (scope, ids) => {
   calls++;
-  if (scope === 'all') deleteHistoryFile(file, history); else deleteRuns(file, history, ids);
+  if (scope === 'all') clearHistory(file, history); else deleteRuns(file, history, ids);
   win.webContents.send('readout:history', history);
 });
 function handle(channel, fn) {
@@ -113,10 +113,11 @@ async function main() {
   await confirm(); await phrase('DELETE 2'); await confirm();
   assert.ok(fs.existsSync(file));
   await confirm();
-  assert.ok(!fs.existsSync(file));
+  assert.ok(fs.existsSync(file));
+  assert.deepStrictEqual(loadHistory(file).runs, [], 'delete-all empties the retained database');
   assert.strictEqual(await js(`document.querySelectorAll('.run').length`), 0);
   assert.strictEqual(await js(`el('history-delete-all').disabled`), true);
-  // The next completed run recreates the DB and re-enables management.
+  // The next completed run uses the cleared DB and re-enables management.
   appendRun(file, history, fixture(500));
   win.webContents.send('readout:history', history);
   await js('Promise.resolve()');

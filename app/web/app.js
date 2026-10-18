@@ -36,10 +36,7 @@ function icon(node, name, dim) {
 // itemKey() reduces it to the token both tables are keyed by. Until the
 // tables arrive an offer shows its name alone.
 //
-// Dropped before joining, so "Ring of Dispel" keys as "ringdispel". itemKey()
-// in app/assets/tables.ts is this function; change both or neither --
-// test-item-tables holds them equal over every shipped name.
-const ICON_DROP = new Set(["of", "the", "and", "a"]);
+const itemKey = RunPresentation.itemKey;
 let ITEM_TEXT = {};
 let SHOP_ICONS = {};
 let ITEM_NAMES = {};
@@ -61,17 +58,6 @@ function applyAssets(tables) {
   if (lastRenderedFrame) render(lastRenderedFrame);
   renderHistory();
   refreshTip();
-}
-
-/** The token a display name reduces to; the key of ITEM_TEXT and SHOP_ICONS. */
-function itemKey(name) {
-  // The game spells one possessive with U+2019 ("Bloody Mary’s Mirror").
-  return String(name).replace(/\u2019/g, "'").toLowerCase()
-    .replace(/'s\b/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim().split(" ")
-    .filter((w) => w && !ICON_DROP.has(w))
-    .join("");
 }
 
 // --- tooltip --------------------------------------------------------------
@@ -770,7 +756,7 @@ function renderDiag(s) {
   bits.push(`${s.found}/${s.tracked} values resolved`);
   bits.push(`re-sweep every ${s.sweep_interval}s`);
   bits.push(`poll ${s.poll_ms} ms`);
-  if (historySkipped) bits.push(`${historySkipped} unreadable history line${historySkipped === 1 ? "" : "s"}`);
+  if (historySkipped) bits.push(`${historySkipped} unreadable history record${historySkipped === 1 ? "" : "s"}`);
   el("diag").textContent = bits.join(" · ");
 }
 
@@ -1587,13 +1573,13 @@ function renderHistoryDeletion() {
   el("history-delete-description").textContent = final
     ? "This is the final confirmation. Deletion is permanent and cannot be undone."
     : wholeFile
-      ? "Review all saved runs below. This removes the SQLite history file. New runs will start a fresh history."
+      ? "Review all saved runs below. This permanently deletes every saved run. New runs will still be saved."
       : "Review the selected runs below. Their saved statistics, talents, objects and melodies will be permanently removed.";
   const review = el("history-delete-review");
   review.textContent = "";
   for (const id of state.ids) {
     const run = historyRuns.find(run => run.id === id);
-    review.append(make("li", "", run ? `${heroName(run)} · ${formatWhen(run.ended)} · ${run.result === "victory" ? "Victory" : "Defeat"} · ID ${id}` : `Run ID ${id}`));
+    review.append(make("li", "", run ? `${heroName(run)} · ${formatWhen(run.ended)} · ${run.result === "victory" ? "Victory" : "Defeat"}` : "Unavailable run"));
   }
   el("history-delete-phrase").hidden = !phrase;
   el("history-delete-prompt").textContent = `Type DELETE ${count} to confirm the number of records.`;

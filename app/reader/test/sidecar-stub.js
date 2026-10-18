@@ -5,6 +5,9 @@
 const fs = require('fs');
 
 const mode = process.env.SIDECAR_TEST_MODE || 'fail';
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => { if (mode !== 'ignore-stop') process.exit(0); });
+process.stdin.resume();
 
 if (mode === 'fail') {
   process.stderr.write('stub child failure\n');
@@ -44,7 +47,7 @@ if (mode === 'fail') {
     process.stdout.write(JSON.stringify({ pid: process.pid, count }) + '\n');
     setInterval(() => {}, 60000);
   }
-} else if (mode === 'stay') {
+} else if (mode === 'stay' || mode === 'ignore-stop') {
   process.stdout.write(JSON.stringify({ pid: process.pid, ok: true }) + '\n');
   setInterval(() => {}, 60000);
 } else {
