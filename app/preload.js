@@ -1,11 +1,7 @@
 // Preload script, running in the isolated context contextIsolation creates.
 //
-// Exposes five one-way (main -> renderer) subscriptions: state frames from
-// the reader/stdio.js sidecar, a notice for when that sidecar process has
-// exited, the item tables main.js decodes from the game install, the
-// result of the launch update check, and the run history. Nothing else crosses the bridge -- not
-// ipcRenderer itself, not a general-purpose send -- so the renderer can only
-// ever listen, never talk back to the sidecar or the main process.
+// Exposes subscriptions plus three narrowly scoped history-deletion requests.
+// No general-purpose IPC or filesystem access crosses the bridge.
 //
 // Channel names are inlined below, NOT required from a shared ./channels.js
 // module: BrowserWindow's webPreferences omits `sandbox`, and per current
@@ -52,7 +48,7 @@ contextBridge.exposeInMainWorld('ravenswatch', {
   // text when it has one (e.g. the "not running" line), not a substitute.
   onSidecarDown: subscribe(SIDECAR_DOWN_CHANNEL),
 
-  // callback({ITEM_TEXT, SHOP_ICONS, ITEM_NAMES}) fires with the cached
+  // callback({ITEM_TEXT, SHOP_ICONS, ITEM_NAMES, OBJECT_KEYS, HERO_ICONS, DIFFICULTY_ICONS, TALENT_ICONS}) fires with the cached
   // tables at startup when a cache exists, and after each rebuild.
   onAssets: subscribe(ASSETS_CHANNEL),
 
@@ -65,4 +61,8 @@ contextBridge.exposeInMainWorld('ravenswatch', {
   // callback({runs, skipped}) fires with the whole run history, oldest
   // first, on every page load and again after each finished run is saved.
   onHistory: subscribe(HISTORY_CHANNEL),
+  shareRun: (input) => ipcRenderer.invoke('readout:share-run', input),
+  prepareHistoryDeletion: (input) => ipcRenderer.invoke('readout:history-delete-prepare', input),
+  confirmHistoryDeletion: (input) => ipcRenderer.invoke('readout:history-delete-confirm', input),
+  cancelHistoryDeletion: (token) => ipcRenderer.invoke('readout:history-delete-cancel', token),
 });

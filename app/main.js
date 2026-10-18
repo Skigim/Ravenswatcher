@@ -19,7 +19,7 @@
 // sidecar's stderr is diagnostic text (the attach banner, tracebacks), never
 // state: it's logged and never parsed as a frame.
 
-const { app, BrowserWindow, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, shell, protocol, net, ipcMain } = require('electron');
 const { isAllowedExternal } = require('./external-links');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +28,8 @@ const { Worker } = require('worker_threads');
 const { createSidecar } = require('./sidecar');
 const { CACHE_DIR_NAME } = require('./assets/build');
 const { checkForUpdate } = require('./update');
-const { HISTORY_FILE, loadHistory, appendRun } = require('./history');
+const { RunSharer } = require('./share');
+const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, deleteHistoryFile, HistoryDeletion } = require('./history');
 
 // Windows groups taskbar buttons by AppUserModelID, and a pinned shortcut
 // carries the ID of whatever created it. Electron derives a default ID from
@@ -131,7 +132,8 @@ let rendererReady = false;
 // the default menu). Sent when the check lands and on every page load.
 let updateInfo = null;
 
-// The run history, loaded once at startup and appended to as runs finish.
+// SQLite run history, loaded at startup; each
+// complete capture is committed under its ID as a run finishes.
 // Sent whole on every page load and after each append: it is small, and a
 // whole list cannot be applied out of order the way a delta could.
 let HISTORY_PATH = null;
@@ -140,6 +142,32 @@ let history = { runs: [], skipped: 0 };
 function sendHistory() {
   sendToRenderer(HISTORY_CHANNEL, history);
 }
+
+const historyDeletion = new HistoryDeletion(() => history, (scope, ids) => {
+  if (HISTORY_PATH === null) throw new Error('History is unavailable.');
+  try {
+    if (scope === 'all') deleteHistoryFile(HISTORY_PATH, history);
+    else deleteRuns(HISTORY_PATH, history, ids);
+  } finally { sendHistory(); }
+});
+function historyRequest(event, action) {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+    || event.senderFrame !== mainWindow.webContents.mainFrame || event.senderFrame.url !== pathToFileURL(INDEX_HTML).href) {
+    return { ok: false, error: 'History request denied.' };
+  }
+  try { return { ok: true, ...action() }; }
+  catch (error) { return { ok: false, error: error.message }; }
+}
+const runSharer = new RunSharer({findRun:id=>history.runs.find(run=>run.id===id),cacheDir:()=>CACHE_DIR});
+ipcMain.handle('readout:share-run', async (event,input) => {
+  const allowed = historyRequest(event,()=>({allowed:true}));
+  if(!allowed.ok)return allowed;
+  return runSharer.share(input);
+});
+
+ipcMain.handle('readout:history-delete-prepare', (event, input) => historyRequest(event, () => historyDeletion.prepare(input)));
+ipcMain.handle('readout:history-delete-confirm', (event, input) => historyRequest(event, () => historyDeletion.confirm(input?.token, input?.typed)));
+ipcMain.handle('readout:history-delete-cancel', (event, token) => historyRequest(event, () => { historyDeletion.cancel(token); return {}; }));
 
 function recordRun(frame) {
   if (!frame.run_summary || HISTORY_PATH === null) return;

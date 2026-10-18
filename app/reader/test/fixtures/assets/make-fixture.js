@@ -14,6 +14,14 @@ const { encodeName } = require('../../../../assets/cipher');
 function write(root, decodedRel, bytes) {
   const cooked = path.join(root, ...decodedRel.split('/').map(encodeName));
   fs.mkdirSync(path.dirname(cooked), { recursive: true });
+  const ids = { Item_A: '00112233445566778899aabbccddeeff', Item_B: '22'.repeat(16),
+    Curse_Stack_Shard_Quest: '33'.repeat(16), Item_D: '44'.repeat(16), Item_D_Low: '55'.repeat(16),
+    Item_E: '66'.repeat(16), Item_Old: '99'.repeat(16) };
+  const short = decodedRel.split('!').pop().split('.')[0];
+  if (decodedRel.startsWith('EntitySettings/Objects/') && ids[short]) {
+    bytes = Buffer.concat([Buffer.from('2222bbaa', 'hex'), Buffer.from(ids[short], 'hex'),
+      Buffer.from([22, 0, 0, 0]), Buffer.from('Dt Magical Object Data'), bytes]);
+  }
   fs.writeFileSync(cooked, bytes);
 }
 

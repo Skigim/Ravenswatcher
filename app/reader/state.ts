@@ -338,18 +338,14 @@ const TILE_ICONS: readonly (readonly [RegExp, string, string])[] = [
   [/Altar_?Of_?Heroes/i, 'map_altar.png', 'Altar of Heroes'],
   [/Cauldron/i, 'map_cauldron.png', 'Leprechaun\'s Cauldron'],
   [/Grimoire/i, 'map_grimoire.png', 'Grimoire'],
-  // The entrance tile name carries the underground room type (Combat, Cursed,
-  // Gold, Mirror), but the game's own minimap draws every stash entrance with
-  // the same icon until you step inside -- confirmed in-game, 2026-09-09.
-  // Mirror and Gold are the exceptions: their interiors ship distinct icons
-  // (the Bloody Mary mirror art, and the harp art) worth surfacing early.
-  // Combat and Cursed aren't, so they keep the generic stash icon and say
-  // which they are in the label. The bare row is for a name with no room in
-  // it, which the four shipped tile definitions never produce.
+  // The entrance tile exposes the room type before the player enters.
+  // The game keeps a generic minimap entrance, but this panel surfaces the
+  // type with existing game art: mirror, harp, HUD combat swords and the
+  // score page's cursed-room emblem. Unknown types keep the generic stash.
   [/Thieves_?Stashes?_Entrance_Mirror_?Room/i, 'map_mirror.png', 'Thieves\' Stash (Magic Mirror)'],
   [/Thieves_?Stashes?_Entrance_Gold_?Room/i, 'map_harp.png', 'Thieves\' Stash (Dagda\'s Harp)'],
-  [/Thieves_?Stashes?_Entrance_Combat_?Room/i, 'map_thieves_stash.png', 'Thieves\' Stash (Combat)'],
-  [/Thieves_?Stashes?_Entrance_Cursed_?Room/i, 'map_thieves_stash.png', 'Thieves\' Stash (Cursed)'],
+  [/Thieves_?Stashes?_Entrance_Combat_?Room/i, 'icon_in_combat.png', 'Thieves\' Stash (Combat)'],
+  [/Thieves_?Stashes?_Entrance_Cursed_?Room/i, 'score_cursed_room.png', 'Thieves\' Stash (Cursed)'],
   [/Thieves_?Stash/i, 'map_thieves_stash.png', 'Thieves\' Stash'],
   [/Wishing_?Well/i, 'map_wishing_well.png', 'Wishing Well'],
   [/Refugee/i, 'map_refugees.png', 'Refugees\' Camp'],
@@ -444,9 +440,8 @@ export function groupTiles(tiles: readonly PlacedTile[] | null): TileIconView[] 
     // A tier read off a thing with no ring to show it on would sort cells
     // apart for a difference the panel cannot draw.
     const tier = outline === null ? null : bucketTier(tile.tier);
-    // Label is part of the key because two rows share the stash icon and
-    // differ only in what the tooltip says (Combat, Cursed). Merging them
-    // would count both under whichever came first.
+    // Keep separately named POIs apart even when they share artwork, so the
+    // hover label never promises a different kind of location.
     // Different bosses cannot share one cell whose hover promises only one.
     const key = `${icon}#${label}#${tier ?? ''}#${boss ?? ''}`;
     const seen = cells.get(key);

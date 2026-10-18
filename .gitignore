@@ -55,3 +55,7 @@
 /app/assets/*.js
 /app/assets/*.js.map
 /app/assets/*.d.ts
+
+/app/share.js
+/app/share.js.map
+/app/share.d.ts

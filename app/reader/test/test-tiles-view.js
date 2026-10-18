@@ -231,7 +231,7 @@ function testIconsForKeptThings() {
     '40x40_Dark_Hills_Altar_Of_Heroes': 'map_altar.png',
     '40x40_Dark_Hills_Cauldron_T1': 'map_cauldron.png',
     '40x40_Dark_Hills_Grimoire_T2': 'map_grimoire.png',
-    '40x40_DarkHills_Thieves_Stashes_Entrance_Combat_Room_01': 'map_thieves_stash.png',
+    '40x40_DarkHills_Thieves_Stashes_Entrance_Combat_Room_01': 'icon_in_combat.png',
     '40x40_Old_Shipyard_CrystalField': 'map_crystal.png',
     '6x6_Dark_Hills_Refugee_01': 'map_refugees.png',
     '6x6_Collectible_Key': 'map_key.png',
@@ -329,23 +329,25 @@ function testCollapsesByIcon() {
   assert.strictEqual(new Set(keys).size, cells.length);
 }
 
-// The four stash rooms share one entrance icon on the game's minimap. Mirror
-// and Gold get their interior art; Combat and Cursed keep the stash icon and
-// say which they are in the label -- so they must stay two cells, not one
-// stash counted twice.
+// The panel distinguishes all four stash rooms using existing game art.
+// Underground rooms must not add a second copy of their entrance.
 function testStashRoomsStayApart() {
   const cells = groupTiles([
     tile('40x40_DarkHills_Thieves_Stashes_Entrance_Combat_Room_01', 'category'),
     tile('40x40_DarkHills_Thieves_Stashes_Entrance_Cursed_Room_01', 'category'),
     tile('40x40_DarkHills_Thieves_Stashes_Entrance_Gold_Room_01', 'category'),
     tile('40x40_DarkHills_Thieves_Stashes_Entrance_Mirror_Room_01', 'category'),
+    tile('DarkHill_Thieves_Stashes_Combat_Room_Underground_01', 'sublevel'),
+    tile('DarkHill_Thieves_Stashes_Cursed_Room_Underground_01', 'sublevel'),
   ]);
   assert.deepStrictEqual(cells.map(c => [c.icon, c.label, c.count]), [
-    ['map_thieves_stash.png', "Thieves' Stash (Combat)", 1],
-    ['map_thieves_stash.png', "Thieves' Stash (Cursed)", 1],
+    ['icon_in_combat.png', "Thieves' Stash (Combat)", 1],
+    ['score_cursed_room.png', "Thieves' Stash (Cursed)", 1],
     ['map_harp.png', "Thieves' Stash (Dagda's Harp)", 1],
     ['map_mirror.png', "Thieves' Stash (Magic Mirror)", 1],
   ]);
+  assert.ok(cells.slice(0, 2).every(c => c.outline === null && c.tier === null), 'swords and cursed emblem are untiered art');
+  assert.strictEqual(tileIcon('40x40_Thieves_Stashes_Entrance_Unknown_Room_01')[0], 'map_thieves_stash.png', 'unknown rooms retain the generic stash');
 }
 
 // 148 tiles in. The whole complaint this replaced was that all of them were

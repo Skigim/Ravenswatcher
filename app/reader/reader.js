@@ -87,6 +87,11 @@ class Reader {
       if (m.placement !== undefined) this.placed = m.placement;
       if (m.placement_misses !== undefined) this.placementMisses = m.placement_misses;
       if (m.melodies !== undefined) this.melodiesData = m.melodies;
+      if (m.runReset || m.melodies !== undefined) {
+        // The runs worker snapshots the last in-run payload at the end edge,
+        // before the sweep clears its live display for the menu.
+        this.runsWorker.postMessage({ type: 'melodies', melodies: m.melodies ?? null, mapId: m.mapId ?? null, reset: !!m.runReset });
+      }
       if (m.melody_status !== undefined) this.melodyStatus = m.melody_status;
       this.sweeps = m.sweeps;
       this.lastSweepMs = m.took_ms;
@@ -162,6 +167,8 @@ class Reader {
   }
 
   clearRun() {
+    // This clears the Live view, including at the end screen. History keeps
+    // its last in-run snapshot until a sweep confirms the next run began.
     this.placed = null;
     this.placementMisses = 0;
     this.melodiesData = null;

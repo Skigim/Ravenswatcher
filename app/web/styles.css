@@ -11,18 +11,7 @@
    this same weight list to a variable-font-capable UA -- the CSS below still
    requests discrete weights (400/500/600/700/800) via var(--font); the
    engine interpolates each from the one file's wght axis. */
-@font-face {
-  font-family: "Archivo";
-  /* format("woff2"), not the "woff2-variations" draft identifier: that
-     string was never in the shipped spec, and a UA that doesn't recognise a
-     format hint is entitled to skip the source entirely -- which would drop
-     the page silently to system-ui. The variable axis is declared by the
-     font-weight range below, not by the format hint. */
-  src: url("assets/fonts/Archivo-variable-latin.woff2") format("woff2");
-  font-weight: 400 800;
-  font-style: normal;
-  font-display: swap;
-}
+@import url("typography.css");
 
 :root {
   --neutral-100: #f8f4f4;
@@ -73,6 +62,13 @@
   --pad-lg: 26px;
 }
 
+/* One preference applies to both the readout and History, including tooltips. */
+.stylized-fonts { --font: "Alegreya Sans", Archivo, system-ui, sans-serif; }
+.stylized-fonts :is(.brand, .kicker, .tab, .run-outcome, .run-detail-tab, .run-detail-total, .settings-label, .curtain-headline, .tip-name) {
+  font-family: "Germania One", var(--font);
+  font-weight: 400;
+}
+
 /* Seams off. Geometry is untouched on purpose: every gap keeps its 2px and
    every rule keeps its height, so not one box moves -- only the paint under
    them changes to match its neighbours. Collapsing them (gap: 0, display:
@@ -84,6 +80,21 @@
 }
 
 * { box-sizing: border-box; }
+
+
+/* Keep scrolling controls on the same dark palette as the panels. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: var(--ground); }
+::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  background: var(--neutral-700);
+  border: 2px solid var(--ground);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--neutral-600); }
+::-webkit-scrollbar-thumb:active { background-color: var(--neutral-500); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 body {
   margin: 0;
@@ -155,28 +166,13 @@ body {
 
 .head-right { display: flex; align-items: center; gap: 2px; }
 
-/* Live: one pill saying whether the sweep has the process. */
-.status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--divider);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--neutral-400);
-}
-.status-dot {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  background: var(--neutral-700);
-}
-.status-live .status-dot { background: var(--accent-500); }
-.status-live { color: var(--neutral-100); }
-
+/* A quiet connection dot. Names and failure details live in its tooltip. */
+.status { display: grid; place-items: center; width: 28px; height: 36px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-600); }
+.status-live .status-dot { background: var(--positive-500); }
+.status[data-connection="stale"] .status-dot { background: var(--accent-400); }
+.status[data-connection="error"] .status-dot { background: var(--accent-500); }
+.status:focus-visible { outline: 1px solid var(--neutral-500); outline-offset: 2px; }
 
 /* — settings — */
 /* The gear sits beside the status pill in a wrapper, not as a third child of
@@ -1125,10 +1121,10 @@ body.view-history .curtain {
   cursor: pointer;
   width: 100%;
   display: grid;
-  grid-template-columns: 150px minmax(180px, 1.1fr) 110px minmax(240px, 2fr) 28px;
+  grid-template-columns: 96px 160px 40px 68px minmax(0, 1fr) 20px;
   align-items: center;
-  gap: 22px;
-  padding: 14px var(--pad) 14px calc(var(--pad) - 4px);
+  gap: 18px;
+  padding: 12px var(--pad) 12px calc(var(--pad) - 4px);
   border-left: 4px solid var(--accent-2-600);
   background: var(--defeat-tint);
   transition: background-color 80ms;
@@ -1152,30 +1148,15 @@ body.view-history .curtain {
 .run-difficulty { font-size: 13px; font-weight: 600; color: var(--neutral-100); }
 .run-when, .run-time { font-size: 11px; color: var(--neutral-500); }
 
-.run-hero { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.run-hero { display: flex; align-items: center; justify-content: center; min-width: 0; }
 .run-portrait {
-  width: 48px;
-  height: 48px;
+  width: 96px;
+  height: 96px;
   flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ground);
-  border: 2px solid var(--divider);
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--neutral-400);
+  background-color: transparent;
+  border: 0;
 }
-.run-hero-text { min-width: 0; }
-.run-hero-name {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.run-sub { margin-top: 3px; font-size: 12px; color: var(--neutral-400); }
+.run-map { font-size: 12px; color: var(--neutral-400); }
 
 .run-score { display: flex; flex-direction: column; gap: 2px; }
 .run-score-value {
@@ -1185,16 +1166,27 @@ body.view-history .curtain {
   line-height: 1;
 }
 
-.run-talents { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.talent {
-  padding: 4px 8px 4px 6px;
-  border-left: 3px solid var(--rarity);
-  background: var(--ground);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--neutral-100);
-  white-space: nowrap;
+.run-talents {
+  display: grid;
+  grid-template-columns: repeat(10, 48px);
+  justify-content: end;
+  gap: 6px;
+  min-width: 0;
 }
+.talent-slot {
+  box-sizing: border-box;
+  width: 48px;
+  height: 48px;
+  padding: 2px;
+  border: 2px solid var(--rarity, var(--divider));
+  background: var(--ground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.talent-slot-empty { border-color: var(--divider); background: rgba(0, 0, 0, 0.12); }
+.run-talents .talent-icon { width: 100%; height: 100%; }
+
 .run-none { font-size: 12px; color: var(--neutral-500); }
 
 .run-chevron { color: var(--neutral-500); justify-self: end; }
@@ -1207,14 +1199,7 @@ body.view-history .curtain {
 .run-detail[hidden] { display: none; }
 .run-victory .run-detail { border-left-color: var(--positive-500); }
 .run-defeat .run-detail { border-left-color: var(--accent-2-600); }
-.run-columns {
-  display: grid;
-  /* auto-fit, so the seven groups share one row at the design width rather
-     than leaving a seam-coloured hole after a wrapped last block. */
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 2px;
-  background: var(--seam);
-}
+
 .run-block {
   background: var(--ground);
   padding: 14px 16px 16px;
@@ -1245,3 +1230,178 @@ body.view-history .curtain {
 }
 .talent-line-name { font-weight: 700; }
 .talent-line-rarity { color: var(--rarity); font-weight: 600; }
+
+.run-detail-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  padding: 0 22px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--divider);
+  background: var(--ground);
+}
+.run-detail-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 13px 0 11px;
+  background: transparent;
+  color: var(--neutral-500);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font: 700 11px var(--font);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.run-detail-tab:hover { color: var(--neutral-100); }
+.run-detail-tab[aria-selected="true"] { color: var(--neutral-100); border-bottom-color: var(--accent-500); }
+.run-detail-tab:focus-visible, .run-object:focus-visible, .run-melody:focus-visible {
+  outline: 2px solid var(--accent-400); outline-offset: 4px;
+}
+.run-tab-portrait { width: 36px; height: 36px; background: center / contain no-repeat; }
+.run-detail-panel { padding: 24px; min-height: 300px; background: var(--ground); }
+.run-detail-panel[hidden] { display: none; }
+.run-detail-panel > .run-block { max-width: 900px; }
+.run-detail-panel .run-block { padding: 0; gap: 18px; }
+.run-detail-panel .run-row { padding: 9px 0; font-size: 14px; border-bottom: 1px solid var(--surface-hover); }
+.run-detail-panel .run-rows { gap: 0; }
+.run-hero-details { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(200px, 1fr); gap: 28px; }
+.run-hero-overview { display: flex; align-items: center; gap: 28px; }
+.run-detail-portrait { width: 128px; height: 128px; flex: none; background: center / contain no-repeat; }
+.run-hero-overview .run-block { flex: 1; }
+.run-detail-talents { grid-column: 1 / -1; }
+.run-talent-build { display: flex; flex-wrap: wrap; gap: 12px; }
+.run-talent-build .talent-slot { width: 64px; height: 64px; }
+.run-talent-build .talent-icon { width: 100%; height: 100%; }
+.run-attributes { align-self: center; }
+.run-detail-total { font-size: 32px; font-weight: 800; }
+.run-score-icons { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 18px; max-width: 850px; }
+.run-score-entry { width: 64px; height: 64px; display: grid; place-items: center; }
+.run-score-entry:hover { background: var(--surface); }
+.run-score-entry:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 4px; }
+.run-score-icon { width: 52px; height: 52px; background: center / contain no-repeat; }
+.run-inventory { display: flex; flex-direction: column; gap: 32px; }
+.run-objects, .run-melodies { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 18px; max-width: 850px; }
+.run-object, .run-melody { width: 64px; height: 64px; position: relative; display: grid; place-items: center; }
+.run-object-frame { width: 46px; height: 46px; transform: rotate(45deg); border: 2px solid var(--object-rarity, var(--divider)); background: var(--surface); }
+.run-object-icon { width: 100%; height: 100%; background: center / contain no-repeat; }
+.run-object-frame .run-object-icon { transform: rotate(-45deg); }
+.object-common { --object-rarity: var(--rarity-common); }
+.object-rare { --object-rarity: var(--rarity-rare); }
+.object-epic { --object-rarity: var(--rarity-epic); }
+.object-legendary { --object-rarity: var(--rarity-legendary); }
+.object-cursed { --object-rarity: var(--accent-2-600); }
+.run-object-count { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); min-width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid var(--object-rarity, var(--divider)); background: var(--ground); font-size: 12px; font-weight: 800; border-radius: 50%; }
+.run-melody { border-bottom: 2px solid var(--divider); padding: 4px; }
+.run-melody.melody-active { border-bottom-color: var(--rarity-legendary); }
+.run-melody.melody-completed { border-bottom-color: var(--positive-400); }
+.run-melody.melody-locked { opacity: 0.5; }
+.run-damage-rows { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.run-damage-row { display: grid; grid-template-columns: 120px minmax(60px, 1fr) 130px; align-items: center; gap: 20px; font-size: 13px; }
+.run-damage-row dt { color: var(--neutral-400); }
+.run-damage-track { height: 16px; background: var(--surface); }
+.run-damage-fill { height: 100%; background: var(--accent-2-600); }
+.run-victory .run-damage-fill { background: var(--positive-500); }
+.run-damage-value { display: flex; justify-content: flex-end; gap: 15px; margin: 0; font-weight: 700; }
+.run-damage-percent { color: var(--neutral-500); min-width: 35px; text-align: right; }
+@media (max-width: 800px) {
+  .run-hero-details { grid-template-columns: 1fr; }
+  .run-hero-overview { gap: 16px; }
+  .run-damage-row { grid-template-columns: 100px minmax(20px, 1fr) 100px; gap: 12px; }
+}
+
+.run-portrait { background-size: contain; background-position: center; background-repeat: no-repeat; }
+.run-difficulty { display: flex; align-items: center; gap: 5px; }
+.run-difficulty-icon, .talent-icon {
+  display: inline-block; width: 22px; height: 22px; flex-shrink: 0;
+  background-size: contain; background-position: center; background-repeat: no-repeat;
+}
+.run-difficulty-icon { width: 40px; height: 40px; }
+.talent { display: inline-flex; align-items: center; gap: 5px; }
+.talent-line { align-items: center; }
+.talent-line-name { flex: 1; }
+
+
+
+@media (max-width: 1120px) {
+  .run-card { grid-template-columns: 88px 145px 32px 56px minmax(0, 1fr) 18px; gap: 12px; }
+  .run-portrait { width: 88px; height: 88px; }
+  .run-talents { grid-template-columns: repeat(10, 36px); gap: 4px; }
+  .talent-slot { width: 36px; height: 36px; }
+  .run-difficulty-icon { width: 32px; height: 32px; }
+}
+@media (max-width: 900px) {
+  .run-talents { grid-template-columns: repeat(5, 38px); gap: 5px; }
+  .talent-slot { width: 38px; height: 38px; }
+}
+@media (max-width: 640px) {
+  .run-card { grid-template-columns: 72px minmax(0, 1fr) 32px 48px 18px; gap: 10px; }
+  .run-portrait { width: 72px; height: 72px; }
+  .run-talents { grid-column: 2 / 5; grid-row: 2; justify-content: start; }
+  .run-chevron { grid-column: 5; grid-row: 1; }
+}
+
+.run-attribute-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.run-attribute { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.run-attribute-icon { width: 40px; height: 40px; background: center / contain no-repeat; }
+.run-attribute-value { font-size: 24px; font-weight: 700; }
+.run-attribute:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 4px; }
+
+/* Refugee stat textures have wider transparent margins than the HUD trio. */
+.run-attribute-icon.attribute-crit_chance { background-size: 70px; }
+.run-attribute-icon.attribute-crit_damage { background-size: 52px; }
+
+/* Run-history management stays secondary to the cards. */
+.history-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--divider); }
+.history-action { font: inherit; font-size: 13px; color: var(--neutral-400); background: transparent; border: 1px solid var(--divider); padding: 7px 11px; cursor: pointer; }
+.history-action:hover { color: var(--neutral-100); border-color: var(--neutral-400); }
+.history-action:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+.history-action:disabled { opacity: .4; cursor: default; }
+.history-action.history-danger { color: var(--accent-400); }
+.history-delete-all { margin-left: auto; }
+.history-select-all { display: flex; align-items: center; gap: 7px; color: var(--neutral-400); font-size: 13px; }
+.history-select-all[hidden], .history-action[hidden] { display: none; }
+.history input[type="checkbox"] { accent-color: var(--accent-500); width: 17px; height: 17px; cursor: pointer; }
+.history-selecting .run { display: grid; grid-template-columns: 36px minmax(0, 1fr); }
+.run-selection { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--divider); }
+.history-selecting .run-card { grid-column: 2; }
+.history-selecting .run-detail { grid-column: 1 / -1; }
+.run-detail-actions { display: flex; justify-content: flex-end; padding: 10px 18px; border-top: 1px solid var(--divider); }
+.history-delete-dialog { box-sizing: border-box; width: min(540px, calc(100vw - 36px)); max-height: calc(100vh - 48px); overflow-y: auto; padding: 26px; color: var(--neutral-100); background: var(--surface); border: 1px solid var(--divider); box-shadow: 0 18px 80px #0009; }
+.history-delete-dialog::backdrop { background: #000b; }
+.stylized-fonts .history-delete-dialog h2 { font-family: "Germania One", var(--font); font-weight: 400; }
+.history-delete-dialog h2 { margin: 12px 0; font-size: 27px; }
+.history-delete-dialog p { color: var(--neutral-400); line-height: 1.5; }
+.history-delete-review { max-height: 180px; overflow-y: auto; padding: 10px 10px 10px 25px; font-size: 14px; line-height: 1.5; border: 1px solid var(--divider); }
+.history-delete-review li + li { margin-top: 8px; }
+.history-delete-phrase { display: grid; gap: 8px; font-size: 15px; }
+.history-delete-phrase[hidden] { display: none; }
+.history-delete-phrase input { box-sizing: border-box; width: 100%; background: var(--ground); border: 1px solid var(--neutral-400); color: var(--neutral-100); padding: 10px; font: inherit; }
+.history-delete-phrase input:focus { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+.history-delete-dialog .history-delete-error { color: var(--accent-400); }
+.history-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+.tip-head { display: flex; align-items: center; gap: 12px; }
+.tip-icon { width: 46px; height: 46px; flex: none; background: center / contain no-repeat; border: 2px solid var(--tip-rarity, var(--divider)); }
+.tip-icon[hidden], .tip-meta[hidden] { display: none; }
+.tip-meta { margin-top: 4px; font-size: 12px; color: var(--tip-rarity, var(--neutral-400)); }
+.tip-talent { box-sizing: border-box; max-height: calc(100vh - 20px); overflow-y: auto; width: min(420px, calc(100vw - 20px)); max-width: calc(100vw - 20px); border-color: var(--tip-rarity, var(--divider)); }
+.tip-talent .tip-body { font-size: 14px; line-height: 1.5; margin-top: 14px; }
+.tip[data-rarity="common"] { --tip-rarity: var(--rarity-common); }
+.tip[data-rarity="rare"] { --tip-rarity: var(--rarity-rare); }
+.tip[data-rarity="epic"] { --tip-rarity: var(--rarity-epic); }
+.tip[data-rarity="legendary"] { --tip-rarity: var(--rarity-legendary); }
+.tip[data-rarity="ultimate"] { --tip-rarity: var(--rarity-ultimate); }
+.run-melodies { grid-template-columns: repeat(auto-fill, 96px); row-gap: 24px; }
+.run-melody { width: 96px; height: 96px; box-sizing: border-box; grid-template-rows: 64px auto; }
+.run-melody > .run-object-icon { width: 64px; height: 64px; }
+.run-melody-progress { font-size: 12px; white-space: nowrap; color: var(--neutral-400); }
+.melody-completed .run-melody-progress { color: var(--positive-400); }
+
+.run-talent-build .talent:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 3px; }
+
+.run-share-status { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: right; color: var(--neutral-400); font-size: 14px; align-self: center; margin-right: 14px; }

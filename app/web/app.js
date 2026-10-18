@@ -42,11 +42,25 @@ function icon(node, name, dim) {
 const ICON_DROP = new Set(["of", "the", "and", "a"]);
 let ITEM_TEXT = {};
 let SHOP_ICONS = {};
+let ITEM_NAMES = {};
+let OBJECT_KEYS = {};
+let OBJECT_RARITIES = {};
+let HERO_ICONS = {};
+let DIFFICULTY_ICONS = {};
+let TALENT_ICONS = {};
 
 function applyAssets(tables) {
   ITEM_TEXT = (tables && tables.ITEM_TEXT) || {};
   SHOP_ICONS = (tables && tables.SHOP_ICONS) || {};
+  ITEM_NAMES = (tables && tables.ITEM_NAMES) || {};
+  OBJECT_KEYS = (tables && tables.OBJECT_KEYS) || {};
+  OBJECT_RARITIES = (tables && tables.OBJECT_RARITIES) || {};
+  HERO_ICONS = (tables && tables.HERO_ICONS) || {};
+  DIFFICULTY_ICONS = (tables && tables.DIFFICULTY_ICONS) || {};
+  TALENT_ICONS = (tables && tables.TALENT_ICONS) || {};
   if (lastRenderedFrame) render(lastRenderedFrame);
+  renderHistory();
+  refreshTip();
 }
 
 /** The token a display name reduces to; the key of ITEM_TEXT and SHOP_ICONS. */
@@ -82,13 +96,22 @@ function placeTip(target) {
   let left = r.left + r.width / 2 - w / 2;
   left = Math.max(edge, Math.min(left, window.innerWidth - w - edge));
   tipEl.style.left = left + "px";
+  top = Math.max(edge, Math.min(top, window.innerHeight - h - edge));
   tipEl.style.top = top + "px";
 }
 
 function showTip(target) {
   tipAnchor = target;
-  el("tip-name").textContent = target.dataset.tipName;
+  RunPresentation.setName(el("tip-name"), target.dataset.tipName);
   el("tip-body").textContent = target.dataset.tipBody || "";
+  const art = el("tip-icon"), meta = el("tip-meta");
+  art.hidden = !target.dataset.tipIcon;
+  if (target.dataset.tipIcon) icon(art, target.dataset.tipIcon);
+  else art.style.backgroundImage = "";
+  meta.textContent = target.dataset.tipMeta || "";
+  meta.hidden = !meta.textContent;
+  tipEl.classList.toggle("tip-talent", target.dataset.tipKind === "talent");
+  tipEl.dataset.rarity = target.dataset.tipRarity || "";
   tipEl.hidden = false;
   placeTip(target);
 }
@@ -109,6 +132,11 @@ function refreshTip() {
 }
 
 function initTip() {
+  document.addEventListener("focusin", e => {
+    const target = e.target.closest ? e.target.closest("[data-tip-name]") : null;
+    if (target) showTip(target);
+  });
+  document.addEventListener("focusout", () => hideTip());
   document.addEventListener("mouseover", (e) => {
     const target = e.target.closest ? e.target.closest("[data-tip-name]") : null;
     if (!target) { if (tipAnchor) hideTip(); return; }
@@ -143,6 +171,7 @@ function setTip(node, name, body) {
 // can throw on the property rather than return null, and a look preference
 // is never worth taking the page down for.
 const PANEL_LINES_KEY = "ravenswatch:panel-lines";
+const STYLIZED_FONTS_KEY = "ravenswatch:stylized-fonts";
 const DIAG_BAR_KEY = "ravenswatch:diagnostics";
 const TILE_COLS_KEY = "ravenswatch:tile-columns";
 const TILE_COLS_MIN = 3;
@@ -157,6 +186,18 @@ function readPanelLines() {
 function writePanelLines(on) {
   try { localStorage.setItem(PANEL_LINES_KEY, on ? "on" : "off"); }
   catch { /* unavailable: the setting still applies, it just won't persist */ }
+}
+
+function readStylizedFonts() {
+  try { return localStorage.getItem(STYLIZED_FONTS_KEY) !== "off"; }
+  catch { return true; }
+}
+function applyStylizedFonts(on) {
+  document.body.classList.toggle("stylized-fonts", on);
+}
+function writeStylizedFonts(on) {
+  try { localStorage.setItem(STYLIZED_FONTS_KEY, on ? "on" : "off"); }
+  catch { /* unavailable: the current choice still applies */ }
 }
 
 function readDiagBar() {
@@ -279,6 +320,17 @@ function initSettings() {
   const toggle = el("panel-lines");
   const diagToggle = el("diag-bar");
 
+  const fontToggle = el("stylized-fonts");
+  let stylized = readStylizedFonts();
+  applyStylizedFonts(stylized);
+  fontToggle.setAttribute("aria-checked", String(stylized));
+  fontToggle.addEventListener("click", () => {
+    stylized = !stylized;
+    applyStylizedFonts(stylized);
+    writeStylizedFonts(stylized);
+    fontToggle.setAttribute("aria-checked", String(stylized));
+  });
+
   let on = readPanelLines();
   applyPanelLines(on);
   toggle.setAttribute("aria-checked", String(on));
@@ -336,19 +388,25 @@ function initSettings() {
   });
 }
 
-function renderHead(s) {
+function renderConnection(state, detail = "") {
+  const names = { connected: "Connected to Ravenswatch", loading: "Connecting to Ravenswatch",
+    waiting: "Waiting for Ravenswatch", stale: "Connection is not responding", error: "Connection unavailable" };
   const host = el("head-right");
-  if (host.dataset.mode !== "live") {
-    host.dataset.mode = "live";
-    host.innerHTML = '<div class="status"><span class="status-dot"></span><span></span></div>';
-  }
-  const pill = host.firstElementChild;
-  // "Live" means the sweep has resolved something this run, not merely that
-  // the process opened -- an attached handle with nothing resolved is still
-  // the first sweep landing.
-  const live = s.found > 0;
-  pill.classList.toggle("status-live", live);
-  pill.lastElementChild.textContent = live ? "live" : "loading";
+  host.dataset.mode = "live";
+  if (!host.firstElementChild) host.innerHTML = '<div class="status"><span class="status-dot" aria-hidden="true"></span></div>';
+  const status = host.firstElementChild;
+  status.className = state === "connected" ? "status status-live" : "status";
+  status.dataset.connection = state;
+  status.tabIndex = 0;
+  status.setAttribute("role", "img");
+  status.setAttribute("aria-label", [names[state], detail].filter(Boolean).join(". "));
+  setTip(status, names[state], detail);
+  if (tipAnchor === status) refreshTip();
+}
+
+function renderHead(s) {
+  // Resolved values distinguish a connected reader from one still loading.
+  renderConnection(s.found > 0 ? "connected" : "loading");
 }
 
 // The whole-app red edge that marks combat. One class on <body>; styles.css
@@ -780,6 +838,17 @@ function initCoopConsent() {
 }
 
 function render(s) {
+  // Only a confirmed run boundary changes the view. Missing readings and
+  // chapter changes must not interrupt someone browsing History mid-run.
+  if (Number.isInteger(s.pid) && s.pid > 0) {
+    if (lastRunPid !== null && lastRunPid !== s.pid) activeRunSeen = false;
+    lastRunPid = s.pid;
+  }
+  if (s.no_run === true || s.map_id === -1) activeRunSeen = false;
+  else if (Number.isInteger(s.map_id) && s.map_id >= 0) {
+    if (!activeRunSeen) setView("live");
+    activeRunSeen = true;
+  }
   lastRenderedFrame = s;
 
   // An agreement lasts for the life of the page -- once per app launch. A
@@ -840,7 +909,7 @@ function render(s) {
     setCombatEdge(s.in_combat === 1);
   } else {
     setCombatEdge(false);
-    ensureCurtain(s.map_name ? `Loading ${s.map_name}` : "Loading run");
+    ensureCurtain(s.map_name ? `Loading ${RunPresentation.stageName(s.map_name)}` : "Loading run");
     document.body.classList.add("between-runs-active", "curtain-active");
   }
 }
@@ -850,12 +919,7 @@ function render(s) {
 // quiet. An `{"error": ...}` frame pushed over IPC lands here.
 function markStale() {
   setCombatEdge(false);
-  const host = el("head-right");
-  if (host.dataset.mode === "live") {
-    const pill = host.firstElementChild;
-    pill.classList.remove("status-live");
-    pill.lastElementChild.textContent = "no response";
-  }
+  renderConnection("stale", "Waiting for the next update.");
 }
 
 function formatSidecarMessage(msg) {
@@ -886,14 +950,7 @@ function formatSidecarMessage(msg) {
 function renderSidecarDown(message) {
   setCombatEdge(false);
   hideCoopDialog();
-  const host = el("head-right");
-  if (host.dataset.mode !== "live") {
-    host.dataset.mode = "live";
-    host.innerHTML = '<div class="status"><span class="status-dot"></span><span></span></div>';
-  }
-  const pill = host.firstElementChild;
-  pill.className = "status";
-  pill.lastElementChild.textContent = "not running";
+  renderConnection("waiting", formatSidecarMessage(message));
 
   el("diag").textContent = "Disconnected — waiting for Ravenswatch";
 
@@ -916,14 +973,7 @@ function renderNoTransport() {
   setCombatEdge(false);
   hideCoopDialog();
 
-  const host = el("head-right");
-  if (host.dataset.mode !== "live") {
-    host.dataset.mode = "live";
-    host.innerHTML = '<div class="status"><span class="status-dot"></span><span></span></div>';
-  }
-  const pill = host.firstElementChild;
-  pill.className = "status";
-  pill.lastElementChild.textContent = "not running";
+  renderConnection("error", "Restart the app to reconnect.");
 
   ensureCurtain("The overlay can't start", "Restart the app. If this keeps happening, reinstall it.");
   document.body.classList.add("between-runs-active", "curtain-active");
@@ -949,9 +999,17 @@ function renderNoTransport() {
 // wording change never needs the file rewritten.
 
 let historyRuns = [];
+let selectingHistory = false;
+const selectedHistory = new Set();
+let historyDelete = null;
+let historyDeleteBusy = false;
+let historyDeleteFocus = null;
 let historySkipped = 0;
-let view = "live";
+let view = "history";
+let activeRunSeen = false;
+let lastRunPid = null;
 const expandedRuns = new Set();
+const runDetailTabs = new Map();
 
 const DIFFICULTY_NAMES = { 0: "Adventure", 1: "Twilight", 2: "Darkness", 3: "Nightmare" };
 const CHAPTER_ROMAN = ["I", "II", "III"];
@@ -986,13 +1044,8 @@ const RUN_STAT_GROUPS = [
 const HERO_NAMES = { Red: "Scarlet" };
 
 /** Heroes\Juliet_Update6.herodef.ot -> "Juliet"; falls back to the skin name. */
-function heroName(run) {
-  const def = typeof run.hero_definition === "string" ? run.hero_definition : "";
-  let code = (def.split(/[\\/]/).pop() || "").replace(/\.herodef\.ot$/i, "").replace(/_Update\d+$/i, "");
-  if (!code && typeof run.hero === "string") code = run.hero.replace(/^Hero_/, "").split("_")[0];
-  if (!code) return "Unknown hero";
-  return HERO_NAMES[code] || code.replace(/_/g, " ");
-}
+function heroCodeForRun(run) { return RunPresentation.heroCode(run); }
+function heroName(run) { return RunPresentation.heroName(run); }
 
 function difficultyName(d) {
   if (typeof d !== "number") return DASH;
@@ -1023,7 +1076,7 @@ function formatStat(v) {
 
 function where(run) {
   const bits = [];
-  if (run.map_name) bits.push(run.map_name);
+  if (run.map_name) bits.push(RunPresentation.stageName(run.map_name));
   if (typeof run.chapter === "number" && CHAPTER_ROMAN[run.chapter]) bits.push(`Chapter ${CHAPTER_ROMAN[run.chapter]}`);
   return bits.join(" · ");
 }
@@ -1039,9 +1092,39 @@ function rarityClass(t) {
   return `talent-${RARITY_CLASS[t.rarity_code] || "unknown"}`;
 }
 
-function talentChip(t) {
-  const chip = make("span", `talent ${rarityClass(t)}`, t.name);
-  setTip(chip, t.name, t.rarity || "");
+function talentArt(t, run) {
+  const asset = (TALENT_ICONS[heroCodeForRun(run)] || {})[t.key];
+  if (!asset) return null;
+  const art = make("span", "talent-icon");
+  art.setAttribute("aria-hidden", "true");
+  icon(art, asset);
+  return art;
+}
+
+// The game has already resolved placeholders, percentages and current damage.
+// Remove only paired game markup; textContent keeps stored text inert.
+function cleanGameDescription(text) {
+  return String(text || "").replace(/#([^@]*)@/g, (_, value) => value.replace(/#/g, "").trim()).replace(/&([^~]*)~/g, "$1").replace(/\$([^*]*)\*/g, "$1").trim();
+}
+
+function talentChip(t, run, focusable = false) {
+  const chip = make("span", t ? `talent ${rarityClass(t)}` : "talent-slot-empty");
+  chip.classList.add("talent-slot");
+  if (!t) {
+    chip.setAttribute("aria-hidden", "true");
+    return chip;
+  }
+  const art = talentArt(t, run) || make("span", "talent-icon");
+  if (!art.style.backgroundImage) icon(art, "icon_question.png");
+  chip.append(art);
+  chip.setAttribute("aria-label", [t.name, t.rarity].filter(Boolean).join(" · "));
+  const description = cleanGameDescription(t.description);
+  setTip(chip, t.name, description || "Effect description wasn't recorded for this run.");
+  chip.dataset.tipKind = "talent";
+  chip.dataset.tipIcon = (TALENT_ICONS[heroCodeForRun(run)] || {})[t.key] || "icon_question.png";
+  chip.dataset.tipMeta = t.rarity || "";
+  chip.dataset.tipRarity = RARITY_CLASS[t.rarity_code] || "unknown";
+  if (focusable) chip.tabIndex = 0;
   return chip;
 }
 
@@ -1055,46 +1138,67 @@ function runCard(run) {
   card.type = "button";
   card.setAttribute("aria-expanded", String(open));
 
+  const name = heroName(run);
+  const level = typeof run.level === "number" ? `Level ${Math.floor(run.level)}` : "";
+  const portraitAsset = HERO_ICONS[heroCodeForRun(run)];
+  const hero = make("div", "run-hero");
+  const portrait = make("div", "run-portrait");
+  icon(portrait, portraitAsset || "icon_question.png");
+  portrait.setAttribute("aria-hidden", "true");
+  hero.setAttribute("aria-label", [name, level].filter(Boolean).join(" · "));
+  setTip(hero, name, [level, where(run)].filter(Boolean).join("\n"));
+  hero.append(portrait);
+
   const result = make("div", "run-result");
   result.append(
     make("div", "run-outcome", victory ? "Victory" : "Defeat"),
-    make("div", "run-difficulty", difficultyName(run.difficulty)),
+    make("div", "run-map", where(run)),
     make("div", "run-when", formatWhen(run.ended)),
     make("div", "run-time", formatPlaytime(run.playtime_s)),
   );
 
-  const hero = make("div", "run-hero");
-  const name = heroName(run);
-  const portrait = make("div", "run-portrait", name.charAt(0));
-  portrait.setAttribute("aria-hidden", "true");
-  const heroText = make("div", "run-hero-text");
-  const level = typeof run.level === "number" ? `Level ${Math.floor(run.level)}` : "";
-  heroText.append(
-    make("div", "run-hero-name", name),
-    make("div", "run-sub", [level, where(run)].filter(Boolean).join(" · ")),
-  );
-  hero.append(portrait, heroText);
+  const difficulty = make("div", "run-difficulty");
+  const difficultyArt = make("span", "run-difficulty-icon");
+  difficultyArt.setAttribute("aria-hidden", "true");
+  icon(difficultyArt, DIFFICULTY_ICONS[run.difficulty] || "icon_question.png");
+  difficulty.append(difficultyArt);
+  difficulty.setAttribute("aria-label", difficultyName(run.difficulty));
+  setTip(difficulty, difficultyName(run.difficulty), "Difficulty");
 
   const score = make("div", "run-score");
-  score.append(
-    make("div", "run-score-value", run.score && typeof run.score.total === "number"
-      ? run.score.total.toLocaleString("en-US") : DASH),
-    make("div", "kicker", "Score"),
-  );
+  const scoreValue = run.score && typeof run.score.total === "number"
+    ? run.score.total.toLocaleString("en-US") : DASH;
+  score.append(make("div", "run-score-value", scoreValue));
+  setTip(score, "Score", scoreValue === DASH ? "Score wasn't recorded for this run." : scoreValue);
 
   const talents = make("div", "run-talents");
-  if (Array.isArray(run.talents) && run.talents.length) {
-    for (const t of run.talents) talents.append(talentChip(t));
-  } else {
-    talents.append(make("span", "run-none", Array.isArray(run.talents) ? "No talents" : "Talents unavailable"));
-  }
+  const selected = Array.isArray(run.talents) ? run.talents : [];
+  talents.setAttribute("aria-label", "Talents");
+  for (let i = 0; i < 10; i++) talents.append(talentChip(selected[i], run));
+  if (!selected.length) setTip(talents, "Talents",
+    Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run.");
+  card.setAttribute("aria-label", [victory ? "Victory" : "Defeat", name,
+    difficultyName(run.difficulty), level, `Score ${scoreValue}`, formatPlaytime(run.playtime_s)].filter(Boolean).join(" · "));
 
   const chevron = make("div", "run-chevron");
   chevron.setAttribute("aria-hidden", "true");
   chevron.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
     + ' stroke-linecap="square"><path d="M6 9l6 6 6-6"></path></svg>';
 
-  card.append(result, hero, score, talents, chevron);
+  card.append(hero, result, difficulty, score, talents, chevron);
+  if (selectingHistory) {
+    const label = make("label", "run-selection");
+    const checkbox = make("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedHistory.has(run.id);
+    checkbox.setAttribute("aria-label", `Select ${heroName(run)} · ${formatWhen(run.ended)}`);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedHistory.add(run.id); else selectedHistory.delete(run.id);
+      renderHistoryToolbar();
+    });
+    label.append(checkbox);
+    article.append(label);
+  }
   article.append(card);
 
   const detail = runDetail(run);
@@ -1114,7 +1218,7 @@ function runCard(run) {
 
 function statBlock(title, rows) {
   const block = make("div", "run-block");
-  block.append(make("div", "kicker", title));
+  if (title) block.append(make("div", "kicker", title));
   const list = make("dl", "run-rows");
   for (const [label, value] of rows) {
     const row = make("div", "run-row");
@@ -1125,50 +1229,268 @@ function statBlock(title, rows) {
   return block;
 }
 
-function runDetail(run) {
-  const detail = make("div", "run-detail");
-
-  const scoreBlock = make("div", "run-block");
-  scoreBlock.append(make("div", "kicker", "Score"));
-  if (run.score && Array.isArray(run.score.details)) {
-    const list = make("ul", "run-lines");
-    for (const line of run.score.details) list.append(make("li", "", line));
-    list.append(make("li", "run-line-total", `Total ${run.score.total.toLocaleString("en-US")}`));
-    scoreBlock.append(list);
-  } else {
-    scoreBlock.append(make("div", "run-none", "The score wasn't recorded for this run."));
+function runObjects(run) {
+  const block = make("div", "run-block run-objects-block");
+  block.append(make("div", "kicker", "Magical objects"));
+  if (!Array.isArray(run.objects) || !run.objects.length) {
+    block.append(make("div", "run-none", Array.isArray(run.objects)
+      ? "No magical objects." : "Objects weren't recorded for this run."));
+    return block;
   }
-
-  const buildBlock = make("div", "run-block");
-  buildBlock.append(make("div", "kicker", "Talents"));
-  if (Array.isArray(run.talents) && run.talents.length) {
-    const list = make("ul", "run-lines");
-    for (const t of run.talents) {
-      const li = make("li", `talent-line ${rarityClass(t)}`);
-      li.append(make("span", "talent-line-name", t.name), make("span", "talent-line-rarity", t.rarity || DASH));
-      list.append(li);
+  const counts = Array.isArray(run.object_counts) && run.object_counts.length === run.objects.length
+    ? run.object_counts : null;
+  const rarityClasses = { Common: "common", Rare: "rare", Epic: "epic", Legendary: "legendary", Cursed: "cursed" };
+  const list = make("ul", "run-objects");
+  run.objects.forEach((guid, i) => {
+    const key = typeof guid === "string" ? OBJECT_KEYS[guid] : null;
+    const name = key && ITEM_NAMES[key];
+    const rarity = OBJECT_RARITIES[guid];
+    const count = counts && Number.isInteger(counts[i]) && counts[i] >= 0 && counts[i] <= 65535 ? counts[i] : null;
+    const row = make("li", `run-object object-${rarityClasses[rarity] || "unknown"}`);
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `${name || "Unknown object"}, ${count === null ? "quantity unavailable" : `quantity ${count}`}`);
+    const frame = make("div", "run-object-frame");
+    const art = make("div", "run-object-icon");
+    art.setAttribute("aria-hidden", "true");
+    icon(art, shopIconFor(name));
+    frame.append(art);
+    row.append(frame);
+    if (count !== 1) {
+      const quantity = make("span", "run-object-count", count === null ? "?" : String(count));
+      quantity.setAttribute("aria-label", count === null ? "Quantity unavailable" : `Quantity ${count}`);
+      row.append(quantity);
     }
-    buildBlock.append(list);
-  } else {
-    buildBlock.append(make("div", "run-none",
-      Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run."));
-  }
+    setTip(row, name || "Unknown object", [rarity, key && ITEM_TEXT[key],
+      count === null ? "Quantity wasn't recorded for this run." : `Quantity: ${count}`,
+    ].filter(Boolean).join("\n"));
+    list.append(row);
+  });
+  block.append(list);
+  if (!counts) block.append(make("div", "run-none", "Quantities weren't recorded for this run."));
+  return block;
+}
 
-  const runRows = [
-    ["Hero", heroName(run)],
-    ["Difficulty", difficultyName(run.difficulty)],
-    ["Reached", where(run) || DASH],
+function runMelodies(run) {
+  const block = make("div", "run-block run-melodies-block");
+  block.append(make("div", "kicker", "Melodies"));
+  if (!Array.isArray(run.melodies)) {
+    block.append(make("div", "run-none", "Melodies weren't recorded for this run."));
+    return block;
+  }
+  if (!run.melodies.length) {
+    block.append(make("div", "run-none", "No melodies."));
+    return block;
+  }
+  const list = make("ul", "run-melodies");
+  for (const m of run.melodies) {
+    const state = ["locked", "active", "completed"].includes(m.state) ? m.state : null;
+    const row = make("li", `run-melody melody-${state || "unknown"}`);
+    row.tabIndex = 0;
+    const required = Number.isInteger(m.notes) && m.notes > 0 ? m.notes : null;
+    const earned = Number.isInteger(m.notes_earned) && m.notes_earned >= 0 && required !== null && m.notes_earned <= required ? m.notes_earned : null;
+    const progress = state === "active" ? `${earned === null ? DASH : earned}/${required === null ? DASH : required} notes` : state === "completed" ? "Completed" : null;
+    row.setAttribute("aria-label", `${m.name}, ${progress || state || "state unavailable"}`);
+    const art = make("div", "run-object-icon");
+    art.setAttribute("aria-hidden", "true");
+    const unavailable = state === "locked" || !state;
+    icon(art, unavailable ? "UI_Melody_Icon_Locked.png" : m.icon, unavailable);
+    row.append(art);
+    if (progress) row.append(make("span", "run-melody-progress", progress));
+    setTip(row, m.name, [progress || state || "State wasn't recorded.", m.effect].filter(Boolean).join("\n"));
+    list.append(row);
+  }
+  block.append(list);
+  return block;
+}
+
+function runHeroDetails(run) {
+  const pane = make("div", "run-hero-details");
+  const overview = make("div", "run-hero-overview");
+  const portrait = make("div", "run-detail-portrait");
+  icon(portrait, HERO_ICONS[heroCodeForRun(run)] || "icon_question.png");
+  portrait.setAttribute("aria-label", heroName(run));
+  setTip(portrait, heroName(run), where(run));
+  overview.append(portrait, statBlock("Run", [
+    ["Difficulty", difficultyName(run.difficulty)], ["Reached", where(run) || DASH],
     ["Time", formatPlaytime(run.playtime_s)],
     ["Level reached", typeof run.level === "number" ? run.level.toFixed(2) : DASH],
-  ];
+  ]));
+  const attributes = make("div", "run-block run-attributes");
+  attributes.append(make("div", "kicker", "Hero attributes"));
+  if (run.hero_stats && typeof run.hero_stats === "object") {
+    const stats = make("ul", "run-attribute-stats");
+    for (const [label, key] of [["Vitality", "vitality"], ["Damage", "damage"], ["Armor", "armor"],
+      ["Critical chance", "crit_chance"], ["Critical damage", "crit_damage"]]) {
+      const value = formatStat(run.hero_stats[key]);
+      const stat = make("li", "run-attribute");
+      stat.tabIndex = 0;
+      stat.setAttribute("aria-label", `${label}: ${value}`);
+      const art = make("span", `run-attribute-icon attribute-${key}`);
+      art.setAttribute("aria-hidden", "true");
+      icon(art, `stat_${key}.png`);
+      stat.append(art, make("span", "run-attribute-value", value));
+      setTip(stat, label, value);
+      stats.append(stat);
+    }
+    attributes.append(stats);
+  } else attributes.append(make("div", "run-none", "Hero attributes weren't recorded for this run."));
+  const talents = make("div", "run-block run-detail-talents");
+  talents.append(make("div", "kicker", "Talents"));
+  const list = make("div", "run-talent-build");
+  const selected = Array.isArray(run.talents) ? run.talents : [];
+  for (let i = 0; i < 10; i++) list.append(talentChip(selected[i], run, true));
+  talents.append(list);
+  if (!selected.length) talents.append(make("div", "run-none", Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run."));
+  pane.append(overview, attributes, talents);
+  return pane;
+}
 
-  const columns = make("div", "run-columns");
-  columns.append(scoreBlock, buildBlock, statBlock("Run", runRows));
-  for (const [title, key, rows] of RUN_STAT_GROUPS) {
-    const group = run[key] && typeof run[key] === "object" ? run[key] : {};
-    columns.append(statBlock(title, rows.map(([field, label]) => [label, formatStat(group[field])])));
+// These entries match the game's score page art. The Blood Ritual icon is
+// still named KeyKeeper in the resources (crossed swords in the score page).
+const SCORE_ACTIVITY_ICONS = {
+  "victory": "score_victory.png", "multiplayer": "score_multiplayer.png",
+  "grimoire": "score_grimoire.png", "side quest": "score_mission.png",
+  "cursed room": "score_cursed_room.png", "leprechaun's cauldron": "score_cauldron.png",
+  "altar of heroes": "map_altar.png", "blood ritual": "score_keykeeper.png",
+  "wishing well": "map_wishing_well.png", "stingy jack": "score_stingy_jack.png",
+  "optional boss": "score_boss.png", "early awakening of the boss": "score_early_boss.png",
+};
+function scoreIconForLine(line, run) {
+  const label = line.split(":", 1)[0].trim().toLowerCase().replace(/’/g, "'").replace(/\s+/g, " ");
+  if (label === "base score") return DIFFICULTY_ICONS[run.difficulty] || "icon_question.png";
+  if (label === "level") return "score_level.png";
+  return SCORE_ACTIVITY_ICONS[label] || "icon_question.png";
+}
+
+function runScoreDetails(run) {
+  const block = make("div", "run-block run-score-details");
+  const total = run.score && typeof run.score.total === "number" ? run.score.total.toLocaleString("en-US") : DASH;
+  block.append(make("div", "kicker", "Score"), make("div", "run-detail-total", total));
+  if (run.score && Array.isArray(run.score.details)) {
+    const list = make("ul", "run-score-icons");
+    for (const saved of run.score.details) {
+      const line = String(saved);
+      const entry = make("li", "run-score-entry");
+      entry.tabIndex = 0;
+      entry.setAttribute("aria-label", line);
+      const art = make("span", "run-score-icon");
+      art.setAttribute("aria-hidden", "true");
+      icon(art, scoreIconForLine(line, run));
+      entry.append(art);
+      setTip(entry, line);
+      list.append(entry);
+    }
+    block.append(list);
+  } else block.append(make("div", "run-none", "The score wasn't recorded for this run."));
+  return block;
+}
+
+function runDamageDetails(run) {
+  const damage = run.damage || {};
+  const known = n => typeof n === "number" && Number.isFinite(n) && n >= 0;
+  const total = damage.total;
+  const block = make("div", "run-block run-damage-details");
+  block.append(make("div", "kicker", "Damage dealt"), make("div", "run-detail-total", formatStat(total)));
+  const list = make("dl", "run-damage-rows");
+  for (const [field, label] of RUN_STAT_GROUPS[0][2].slice(1, -1)) {
+    const amount = damage[field];
+    const ratio = known(amount) && known(total) ? (total > 0 ? amount / total : amount === 0 ? 0 : null) : null;
+    const row = make("div", "run-damage-row");
+    const track = make("div", "run-damage-track");
+    track.setAttribute("aria-hidden", "true");
+    const fill = make("div", "run-damage-fill");
+    fill.style.width = `${ratio === null ? 0 : Math.min(100, Math.max(0, ratio * 100))}%`;
+    track.append(fill);
+    const value = make("dd", "run-damage-value");
+    value.append(make("span", "", formatStat(amount)), make("span", "run-damage-percent", ratio === null ? DASH : `${Math.floor(ratio * 100)}%`));
+    row.append(make("dt", "", label), track, value);
+    list.append(row);
   }
-  detail.append(columns);
+  block.append(list, statBlock("", [["Highest single damage", formatStat(damage.highest)]]));
+  return block;
+}
+
+function runDetail(run) {
+  const detail = make("div", "run-detail");
+  const inventory = make("div", "run-inventory");
+  inventory.append(runMelodies(run), runObjects(run));
+  const entries = [
+    ["hero", "Hero Details", runHeroDetails(run)],
+    ["score", "Score Details", runScoreDetails(run)],
+    ["inventory", "Melodies and Magical Objects", inventory],
+    ["damage", "Damage Dealt", runDamageDetails(run)],
+    ...RUN_STAT_GROUPS.slice(1).map(([title, key, rows]) => {
+      const group = run[key] && typeof run[key] === "object" ? run[key] : {};
+      return [key, title, statBlock(title, rows.map(([field, label]) => [label, formatStat(group[field])]))];
+    }),
+  ];
+  const tabs = make("div", "run-detail-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Run details");
+  const panels = make("div", "run-detail-panels");
+  const buttons = [], pages = [];
+  const prefix = `run-${String(run.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  entries.forEach(([key, label, content]) => {
+    const tab = make("button", "run-detail-tab", key === "hero" ? undefined : label);
+    tab.type = "button";
+    tab.id = `${prefix}-tab-${key}`;
+    tab.dataset.tab = key;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-label", label);
+    tab.setAttribute("aria-controls", `${prefix}-panel-${key}`);
+    if (key === "hero") {
+      const art = make("span", "run-tab-portrait");
+      icon(art, HERO_ICONS[heroCodeForRun(run)] || "icon_question.png");
+      art.setAttribute("aria-hidden", "true");
+      tab.append(art);
+      setTip(tab, label, heroName(run));
+    }
+    const panel = make("section", `run-detail-panel run-panel-${key}`);
+    panel.id = `${prefix}-panel-${key}`;
+    panel.dataset.panel = key;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", tab.id);
+    panel.tabIndex = 0;
+    panel.append(content);
+    buttons.push(tab); pages.push(panel);
+    tabs.append(tab); panels.append(panel);
+  });
+  const select = (index, focus = false) => {
+    buttons.forEach((button, i) => {
+      const selected = i === index;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      pages[i].hidden = !selected;
+    });
+    runDetailTabs.set(run.id, entries[index][0]);
+    hideTip();
+    if (focus) buttons[index].focus();
+  };
+  buttons.forEach((button, i) => {
+    button.addEventListener("click", () => select(i));
+    button.addEventListener("keydown", event => {
+      let next;
+      if (event.key === "ArrowRight") next = (i + 1) % buttons.length;
+      else if (event.key === "ArrowLeft") next = (i + buttons.length - 1) % buttons.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = buttons.length - 1;
+      else return;
+      event.preventDefault(); select(next, true);
+    });
+  });
+  const active = entries.findIndex(([key]) => key === runDetailTabs.get(run.id));
+  select(active < 0 ? 0 : active);
+  const actions = make("div", "run-detail-actions");
+  const share = make("button", "history-action run-share", "Share Run");
+  share.type = "button";
+  share.dataset.runId = String(run.id);
+  share.disabled = shareBusy || typeof window.ravenswatch?.shareRun !== "function";
+  share.addEventListener("click", () => shareRun(run.id));
+  const status = make("span", "run-share-status");
+  status.setAttribute("role", "status");
+  status.textContent = shareStatuses.get(run.id) || "";
+  actions.append(status, share);
+  detail.append(tabs, panels, actions);
   return detail;
 }
 
@@ -1176,6 +1498,7 @@ function renderHistory() {
   const host = el("history-list");
   if (!host) return;
   host.textContent = "";
+  renderHistoryToolbar();
   const runs = historyRuns.slice().sort((a, b) => b.id - a.id);
   if (!runs.length) {
     const empty = make("div", "history-empty");
@@ -1190,6 +1513,10 @@ function renderHistory() {
 function applyHistory(h) {
   historyRuns = h && Array.isArray(h.runs) ? h.runs : [];
   historySkipped = h && typeof h.skipped === "number" ? h.skipped : 0;
+  const ids = new Set(historyRuns.map(run => run.id));
+  for (const id of selectedHistory) if (!ids.has(id)) selectedHistory.delete(id);
+  for (const id of expandedRuns) if (!ids.has(id)) expandedRuns.delete(id);
+  for (const id of runDetailTabs.keys()) if (!ids.has(id)) runDetailTabs.delete(id);
   renderHistory();
   if (lastRenderedFrame) renderDiag(lastRenderedFrame);
 }
@@ -1204,10 +1531,176 @@ function setView(next) {
   hideTip();
 }
 
+let shareBusy = false;
+const shareStatuses = new Map();
+function refreshShareButtons() {
+  for (const button of document.querySelectorAll(".run-share")) {
+    button.disabled = shareBusy || typeof window.ravenswatch?.shareRun !== "function";
+    button.textContent = shareBusy && Number(button.dataset.runId) === sharingRunId ? "Copying…" : "Share Run";
+    button.previousElementSibling.textContent = shareStatuses.get(Number(button.dataset.runId)) || "";
+  }
+}
+let sharingRunId = null;
+async function shareRun(id) {
+  if (shareBusy || typeof window.ravenswatch?.shareRun !== "function") return;
+  shareBusy = true; sharingRunId = id; shareStatuses.set(id, ""); refreshShareButtons();
+  try {
+    const result = await window.ravenswatch.shareRun({runId:id,stylizedFonts:document.body.classList.contains("stylized-fonts")});
+    if (!result.ok) throw new Error(result.error || "Could not copy this run.");
+    shareStatuses.set(id, "Copied to clipboard");
+  } catch (error) { shareStatuses.set(id, error.message || "Could not copy this run."); }
+  finally { shareBusy = false; sharingRunId = null; refreshShareButtons(); }
+}
+
+function canDeleteHistory() {
+  const bridge = window.ravenswatch;
+  return !!bridge && ["prepareHistoryDeletion", "confirmHistoryDeletion", "cancelHistoryDeletion"].every(key => typeof bridge[key] === "function");
+}
+
+function renderHistoryToolbar() {
+  el("history").classList.toggle("history-selecting", selectingHistory);
+  const available = canDeleteHistory() && historyRuns.length > 0;
+  el("history-select").hidden = selectingHistory;
+  el("history-select").disabled = !available;
+  el("history-delete-all").disabled = !available;
+  el("history-select-all-label").hidden = !selectingHistory;
+  el("history-selection-cancel").hidden = !selectingHistory;
+  const remove = el("history-delete-selected");
+  remove.hidden = !selectingHistory;
+  remove.disabled = !available || !selectedHistory.size;
+  remove.textContent = `Delete selected (${selectedHistory.size})`;
+  const all = el("history-select-all");
+  all.disabled = !available;
+  all.checked = historyRuns.length > 0 && selectedHistory.size === historyRuns.length;
+  all.indeterminate = selectedHistory.size > 0 && !all.checked;
+}
+
+function renderHistoryDeletion() {
+  const state = historyDelete;
+  if (!state) return;
+  const count = state.ids.length;
+  const wholeFile = state.scope === "all";
+  const final = state.step === state.steps;
+  const phrase = state.steps === 3 && state.step === 2;
+  el("history-delete-step").textContent = `Confirmation ${state.step} of ${state.steps}`;
+  el("history-delete-title").textContent = wholeFile ? "Delete all history?" : `Delete ${count === 1 ? "this run" : `${count} runs`}?`;
+  el("history-delete-description").textContent = final
+    ? "This is the final confirmation. Deletion is permanent and cannot be undone."
+    : wholeFile
+      ? "Review all saved runs below. This removes the SQLite history file. New runs will start a fresh history."
+      : "Review the selected runs below. Their saved statistics, talents, objects and melodies will be permanently removed.";
+  const review = el("history-delete-review");
+  review.textContent = "";
+  for (const id of state.ids) {
+    const run = historyRuns.find(run => run.id === id);
+    review.append(make("li", "", run ? `${heroName(run)} · ${formatWhen(run.ended)} · ${run.result === "victory" ? "Victory" : "Defeat"} · ID ${id}` : `Run ID ${id}`));
+  }
+  el("history-delete-phrase").hidden = !phrase;
+  el("history-delete-prompt").textContent = `Type DELETE ${count} to confirm the number of records.`;
+  const confirm = el("history-delete-confirm");
+  confirm.textContent = historyDeleteBusy ? "Please wait…" : final ? "Permanently delete" : phrase ? "Confirm record count" : "Confirm selection";
+  confirm.disabled = historyDeleteBusy || (phrase && el("history-delete-input").value !== `DELETE ${count}`);
+  el("history-delete-cancel").disabled = historyDeleteBusy;
+  el("history-delete-input").disabled = historyDeleteBusy;
+}
+
+async function beginHistoryDeletion(scope, ids) {
+  if (!canDeleteHistory() || historyDeleteBusy || el("history-delete-dialog").open) return;
+  historyDeleteFocus = document.activeElement;
+  historyDeleteBusy = true;
+  historyDelete = { scope, ids: ids || historyRuns.map(run => run.id), step: 1, steps: scope === "single" ? 2 : 3 };
+  el("history-delete-error").textContent = "";
+  el("history-delete-input").value = "";
+  hideTip();
+  renderHistoryDeletion();
+  el("history-delete-dialog").showModal();
+  try {
+    const result = await window.ravenswatch.prepareHistoryDeletion(scope === "all" ? { scope } : { scope, ids });
+    if (!result.ok) throw new Error(result.error);
+    historyDelete = result;
+  } catch (error) {
+    historyDelete = null;
+    el("history-delete-error").textContent = error.message || "Could not prepare deletion.";
+  } finally {
+    historyDeleteBusy = false;
+    renderHistoryDeletion();
+    el("history-delete-cancel").disabled = false;
+    if (!historyDelete) el("history-delete-confirm").disabled = true;
+    el("history-delete-cancel").focus();
+  }
+}
+
+async function confirmHistoryDeletion() {
+  if (!historyDelete?.token || historyDeleteBusy) return;
+  historyDeleteBusy = true;
+  el("history-delete-error").textContent = "";
+  renderHistoryDeletion();
+  try {
+    const result = await window.ravenswatch.confirmHistoryDeletion({ token: historyDelete.token, typed: el("history-delete-input").value });
+    if (!result.ok) throw new Error(result.error);
+    if (result.done) {
+      historyDelete = null;
+      selectingHistory = false;
+      selectedHistory.clear();
+      renderHistory();
+      el("history-delete-dialog").close();
+      el("history-select").focus();
+    } else {
+      historyDelete.step = result.step;
+      el("history-delete-input").value = "";
+    }
+  } catch (error) {
+    // A failed commit consumes its token; require a new review before retrying.
+    const token = historyDelete?.token;
+    historyDelete = null;
+    if (token) window.ravenswatch.cancelHistoryDeletion(token).catch(() => {});
+    el("history-delete-error").textContent = error.message || "History could not be deleted.";
+    el("history-delete-confirm").disabled = true;
+  } finally {
+    historyDeleteBusy = false;
+    renderHistoryDeletion();
+    el("history-delete-cancel").disabled = false;
+    if (el("history-delete-dialog").open) {
+      (historyDelete?.steps === 3 && historyDelete.step === 2 ? el("history-delete-input") : el("history-delete-cancel")).focus();
+    }
+  }
+}
+
+function cancelHistoryDeletion() {
+  if (historyDeleteBusy) return;
+  const token = historyDelete?.token;
+  historyDelete = null;
+  if (token) window.ravenswatch.cancelHistoryDeletion(token).catch(() => {});
+  el("history-delete-dialog").close();
+  (historyDeleteFocus?.isConnected ? historyDeleteFocus : el("history-select")).focus();
+}
+
+function initHistoryDeletion() {
+  el("history-select").addEventListener("click", () => { selectingHistory = true; renderHistory(); });
+  el("history-selection-cancel").addEventListener("click", () => { selectingHistory = false; selectedHistory.clear(); renderHistory(); });
+  el("history-select-all").addEventListener("change", event => {
+    selectedHistory.clear();
+    if (event.target.checked) for (const run of historyRuns) selectedHistory.add(run.id);
+    renderHistory();
+  });
+  el("history-delete-selected").addEventListener("click", () => beginHistoryDeletion(selectedHistory.size === 1 ? "single" : "selected", [...selectedHistory]));
+  el("history-delete-all").addEventListener("click", () => beginHistoryDeletion("all"));
+  el("history-delete-cancel").addEventListener("click", cancelHistoryDeletion);
+  el("history-delete-confirm").addEventListener("click", confirmHistoryDeletion);
+  el("history-delete-input").addEventListener("input", renderHistoryDeletion);
+  el("history-delete-dialog").addEventListener("cancel", event => { event.preventDefault(); cancelHistoryDeletion(); });
+  el("history-delete-dialog").addEventListener("click", event => {
+    if (event.target !== event.currentTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) cancelHistoryDeletion();
+  });
+}
+
 function initHistory() {
   el("tab-live").addEventListener("click", () => setView("live"));
   el("tab-history").addEventListener("click", () => setView("history"));
   renderHistory();
+  setView("history");
 }
 
 // State is pushed over IPC from the sidecar; the page never touches the
@@ -1218,6 +1711,7 @@ initTileDone();
 initSettings();
 initCoopConsent();
 initUpdateBar();
+initHistoryDeletion();
 initHistory();
 
 if (ELECTRON_TRANSPORT) {

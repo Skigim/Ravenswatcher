@@ -1,3 +1,32 @@
+> Share Run implementation, October 17: the expanded card footer now copies
+> a saved-run PNG instead of offering deletion. Dedicated offscreen HTML uses
+> cached runtime art and bundled fonts, with a 1600x1000 default and vertical
+> growth for large inventories. Score modifiers/effect descriptions/section
+> counts are omitted. The image includes the GitHub URL in the footer.
+> A narrow trusted IPC accepts ID/font choice only; main resolves the saved
+> record, waits for resources, captures, normalizes DPI and writes clipboard.
+> Display formatters normalize the stage to Epilogue, including saved aliases.
+> Germania headings compose Kintarō's o/macron while retaining Unicode text.
+> Deletion uses History selection: one row/two confirmations, bulk/three.
+> npm ci, typecheck and full tests passed, including 1x/1.5x/2x DPI checks.
+> The final 1600x1000 image was copied and pasted into a separate Electron
+> document using an existing run/cache; no memory probes or save edits.
+> Installed through app/install.ps1 at E:\Apps\Ravenswatcher and reopened.
+> Installed executable and app.asar hashes match the tested package.
+> Changes remain uncommitted on release/0.1.6; no release was performed.
+
+> October 17: earned-note counts and advanced talent hovers are implemented,
+> tested, rebuilt, and installed at E:\Apps\Ravenswatcher. The app was reopened.
+> Full typecheck/npm test and final History UI checks passed. Installed app.asar
+> and executable SHA256 hashes match build/release/win-unpacked.
+> The private end watcher verified five attributes, ten talent descriptions,
+> and a final snapshot with Galahad/Fairy Godmother completed and Merry Men
+> active at 1/5. At Dwight's request, run 1792282214160 received those note
+> fields in SQLite, with a backup/audit. Deleted older saves were not restored.
+> Wishing Well and Stingy Jack score mappings are included; all 21 entries
+> in that run resolve icons. Changes remain uncommitted on release/0.1.6.
+
+
 # Run history plan
 
 This plan adds run history to Ravenswatcher: when a run ends, the overlay
@@ -126,9 +155,9 @@ the record clears to zero within about a second. In run 1 the window lasted
 rising edge, not on a later state.
 
 The record is live during play. Run 3's walks every 30 s showed level
-reached and the damage rows rising through the run. Playtime is the
-exception: it reads 0 until the flag, then holds the final time. The design
-still reads only on the flag, because the summary is the complete set.
+reached and the damage rows rising through the run. Playtime first populated
+at a chapter boundary in the October 17 victory, before the run ended. The
+reader captures on the defeat/victory edge, never on positive playtime alone.
 
 ## Extraction in the reader
 
@@ -165,25 +194,33 @@ still reads only on the flag, because the summary is the complete set.
 
 ## Storage
 
-The history lives in the main process, in one file:
-`<userData>/run-history.jsonl`. `main.js` sets `userData` to a `Ravenswatcher`
-folder under the per-user app data directory, so it's the same on every
-install and outlives app updates and install slots. On first launch it moves
-the folder earlier releases used, `ravenswatch-live-readout`, to that name.
-The decoded `game-assets` cache lives beside it.
+The history lives in `<userData>/run-history.sqlite`, managed by the main
+process. `main.js` uses the per-user `Ravenswatcher` app data folder, so it
+outlives app updates and install slots. The decoded `game-assets` cache
+remains separate from run records.
 
-- One JSON object per line, one line per run, appended when a capture
-  arrives. Appending never rewrites earlier runs.
-- Every line carries a schema version, `"v": 1`. A later version adds fields;
-  it never changes what an existing field means.
-- Store internal names and raw numbers (`Hero_Juliet_Carnival`, magical
-  object GUIDs, map id, difficulty number, seconds), not display text. The
-  renderer turns them into words at display time, so a language change or a
-  renamed item never rewrites history.
-- A line that doesn't parse is skipped and counted; the count shows in the
-  diagnostics bar, which is opt-in.
+- `runs.id` is the primary key. One row holds one complete versioned run
+  object in `summary_json`, with hero, result, difficulty and time columns
+  for SQL queries. A duplicate ID never overwrites an earlier run.
+- The whole object is committed before the renderer is notified. SQLite's
+  built-in runtime is used; there is no new native dependency.
+- SQLite is the only supported history format; no legacy import is needed.
+- Individual record deletion requires two explicit confirmations. Selected
+  records and the entire history file require three, including a typed count.
+  Confirmation tokens expire after five minutes and are single use. A changed
+  delete-all selection requires a new review. Cancelling never deletes data.
+- Delete-all removes only the SQLite history file and its SQLite sidecars.
+  Settings and decoded assets remain separate. The next run creates a fresh file.
+- New captures add `object_counts`, uint16 quantities parallel to `objects`,
+  and a snapshot of the last resolved in-run `melodies` payload. Unknown
+  counts or melodies are null; older rows may omit them. No old quantity
+  is inferred as one. Empty arrays mean a known empty inventory/payload.
+- Object identities stay as GUIDs; the runtime tables resolve current names,
+  descriptions and icons. Quantities remain paired with their GUIDs.
+- Talents, statistics, score lines and melody states stay with the run ID.
+  Melody art uses the same cache and state treatment as the live display.
 
-Sample line, with run 2's values (wrapped here for reading). Fields that
+Example stored object, with run 2's values (wrapped here for reading). Fields that
 weren't logged or were cut off in the screenshot are `null`:
 
 ```json
@@ -204,13 +241,24 @@ weren't logged or were cut off in the screenshot are `null`:
 
 A **History** tab beside the live readout:
 
+
+The collapsed card uses a borderless 96px hero portrait, an icon-only
+40px difficulty marker, the score, and ten fixed talent slots. Filled
+slots keep selection order and rarity borders; unfilled slots remain blank.
+Hero identity/level, difficulty and talent names/rarities appear in the
+shared hover tooltip, with accessible labels. The portrait and slots scale
+at narrower widths; the expanded breakdown keeps its existing labels.
+
 - A list, newest first, laid out like a match history. Each card shows
   **Victory** or **Defeat**, difficulty, date, time, the hero, level, map and
   chapter, the score, and the talents as chips in their rarity colour.
 - Selecting a card opens the summary in place: the score lines, the talents
   with rarities, and the damage, support, sufferings, and resources rows as
-  the game words them. The portrait is the hero's initial, and magical
-  objects show as a count, until their art and names can be resolved.
+  the game words them. Hero portraits, difficulty icons, and talent art
+  arrive through the same runtime asset cache as the Sandman shop. Objects
+  show their icon, name, quantity, and existing shop tooltip. Melodies show
+  the saved snapshot with portraits and lifecycle states. Older histories
+  retain text fallbacks and say when quantities or melodies were not recorded.
 - With no history yet, the tab says "Finish a run and it shows up here."
 
 Text stays in the game's own words. Nothing on screen names offsets, flags,
@@ -222,19 +270,27 @@ or capture ids.
    (Kintaro's buffer to Scarlet's). The first run of a game session, with no
    earlier score page, hasn't been observed.
 2. **Talents.** Selection, names and rarity work for Kintaro and Scarlet.
-   Rare=1 comes from the player, not a screen match. Delegated names are
-   taken as available at the flag.
-3. **Victory.** Taken as given from the flags. A run that ends with neither
-   flag rising is not recorded.
-4. **Magical object names.** The app has item tables, keyed by definition
-   name. How the record's GUIDs map to those names isn't known yet.
+   The October 17 Kintaro victory supplied a player-verified History card
+   with ten talents, including Rare, Legendary and Ultimate rarities.
+3. **Victory.** The October 17 Kintaro victory was captured automatically
+   and player-verified. Chapter transitions did not raise end flags. A run
+   that ends with neither flag rising is not recorded.
+4. **Magical object names.** The GUID join is confirmed: the record's
+   16-byte GUID matches the serialized `Dt Magical Object Data` component
+   identity in the object's definition. See `live_memory_reading.md`.
+   All 15 final GUIDs in the October 17 run resolved to names and icon
+   resources. Runtime tables now resolve shipped GUIDs through the existing
+   shop name/icon tables. All 15 screen-verified stack quantities total 27;
+   the reader now persists them, and History renders them with the objects.
 5. **Difficulty and chapter numbering.** Difficulty reads 1 for Twilight,
    2 for Darkness, and 3 for Nightmare; Adventure wasn't logged. Chapters
-   are taken to count up from 0 for chapter I.
-6. **Fields by position.** Six rows still have only read zero: dash,
-   trait, other damage, healing to allies, self shield, and shield to allies.
+   were observed progressing 0,1,2,3 with map ids 0,1,2,3 in the October 17
+   victory, ending at Baba Yaga. Final numbering was player-verified.
+6. **Fields by position.** Five rows still have only read zero: dash,
+   trait, other damage, healing to allies, and shield to allies. Self shield
+   matched a player-verified nonzero 23,746 in the October 17 victory.
    Run 4 supplied nonzero screen matches for defense, ultimate, revive
-   assists, shard spending, Stars of Fate, and feathers. Next: use the six
+   assists, shard spending, Stars of Fate, and feathers. Next: use the five
    remaining sources and match their statistics rows.
 7. **Multiplayer.** Run 4 had two players and two `HeroScoreData`
    instances. All 23 statistics in the current-run profile's embedded score
@@ -245,3 +301,114 @@ or capture ids.
    already moved a hero-controller field. A capture whose playtime or level
    reads outside a sane range (0 to 14,400 s, 1 to 99) is dropped and reported,
    not stored.
+
+
+## Player-verified live victory, October 17, 2026
+
+Kintaro, Twilight, Baba Yaga map: score 529, time 57:37, level 14.09.
+The player confirmed every visible field in the expanded History card,
+including all score lines, ten talent names and rarities, and all 23
+statistics. The independent production runs worker captured the same
+summary. The record address held across chapter/map counters 0,1,2,3;
+end flags stayed zero through chapter changes, and victory rose at the
+final end. Playtime populated at a chapter boundary, so a positive playtime
+alone is not evidence that the run ended. Both research watchers were stopped.
+
+Self shield read 23746.185546875 and displayed 23,746, resolving its earlier
+position-only status. All 15 final Magical Object GUIDs resolved to cooked
+definitions and existing icon assets. A subsequent inventory screenshot
+verified all 15 stack quantities: 4,4,1,1,1,1,3,4,1,2,1,1,1,1,1, totaling
+27 collected. Quantities are uint16-LE values in the `+0xF0` vector, in GUID
+order. New v1 summaries now persist these parallel quantities; old records
+remain readable without inventing missing counts. This capture validates one full victory; it does not settle
+the other open cases above.
+
+Private evidence: `stats/run-history-20261017-live/` in the research checkout,
+including `player-validation.json`, `verified-run-summary.json`, and the
+player-confirmed screenshot. No captured game data is copied into this repo.
+
+
+## Expanded History tabs, October 17, 2026
+
+Each expanded run now has seven categories: an icon-only Hero Details tab,
+Score Details, Melodies and Magical Objects, Damage Dealt, Support,
+Sufferings, and Resources. Hero Details contains the five saved attributes
+and ten fixed talent slots. Object icons share the shop cache, use rarity
+from the shipped definition, and show saved stack badges. Melody portraits
+use the saved state. Names and descriptions are available on hover/focus.
+Selection is independent per run and survives history/assets refreshes.
+Damage displays each ability/source amount with its share of total damage.
+Older records keep unknown attributes, quantities and melodies distinct
+from zero or an empty build.
+
+The current Kintaro run's five attributes were restored from the supplied
+Statistics screenshot, and its 15 stack quantities from the verified
+watcher capture (27 total). The end-screen HUD read had already reset three
+attributes; it did not validate a final-stat memory snapshot. Future
+pre-end attribute capture is implemented and synthetically tested, but
+still needs a real run-end comparison. Melodies absent from this older
+record remain unavailable.
+
+
+### Melody snapshot retention
+
+The Live view clears when map id becomes -1. History must retain the last
+melody payload through that clear and through any end-screen level reset,
+until the end edge and delayed score have been saved. The reader now relays
+the sweep's map id with melody updates; clearing Live does not send a History
+reset. The runs worker keeps names, portrait keys, effects, note requirements
+and final lifecycle states through menus and chapter outages. A confirmed
+next active run or same-map restart clears the previous snapshot. Synthetic
+regressions exercise locked/active/completed updates, end-screen reset before
+capture, missing readings, next-run clearing and independent payload copies.
+This saves the final state, not a timestamped timeline of every progress update.
+The completed Kintaro run predates this relay; its saved watcher files contain
+no melody payload to restore.
+
+
+### Attribute art, typography and startup navigation
+
+The five hero attributes now use the game's HUD icons with values below and
+hover/focus labels. They are decoded by the existing runtime icon cache.
+Settings has a persistent Stylized fonts switch, on by default: Germania One
+for headings, Alegreya Sans for body text; turning it off restores Archivo.
+Both font families and their original OFL licenses ship for offline use,
+independently of the game's bitmap font atlases.
+
+History is the initial view. A confirmed active map switches to Live once;
+manual History browsing persists through later polls, unresolved maps, and
+chapter changes. A confirmed no-run map or a new game PID arms the next switch.
+This uses existing state frames and does not add another memory read.
+
+
+### Score icons and connection indicator
+
+Score Details keeps one icon for each saved score line, in order, including
+repeated activities. Hover or keyboard focus reveals the exact saved line.
+Base score reuses the saved difficulty icon; level, victory, multiplayer and
+known activities use their matching resource art. Blood Ritual matches the
+crossed-swords resource still named KeyKeeper. Unrecognized or localized
+labels retain their full text and draw a question-mark icon.
+
+Connection status is a compact dot: connected, connecting, waiting, stale
+or unavailable. Hover/focus supplies its name and diagnostic detail, with
+an accessible label. Updating the connection also refreshes an open tooltip.
+
+
+Score-art install check: the old private reference
+`Book_Menu_Multiplayer_Team_Icon.png` is absent from the current game. The
+runtime cache build correctly failed atomically rather than publishing
+partial output. Multiplayer now uses the current
+`BookMenu/UI_Icon_PlayerResult_2.png` resource. All 14 manifest score texture
+paths were checked against the current install before rebuilding.
+
+
+### Room icons in the map panel
+
+Cursed stash entrances now reuse the score page's purple cursed-room emblem.
+Combat entrances use the existing red HUD crossed swords; this is a panel
+choice, not a claim that the game has a separate combat-room minimap marker.
+Gold rooms already use Dagda's Harp, and Mirror rooms retain the mirror.
+All four keep their existing hover labels. Sublevel records are still excluded
+from counts, and an unrecognized room type retains the generic stash icon.
+No new texture resource or additional memory read is needed for this change.

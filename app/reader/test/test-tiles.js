@@ -896,9 +896,9 @@ function testStashDeduplication() {
   const pairCells = groupTiles([entranceStash, undergroundStash]);
   check('stash pair yields exactly 1 cell', pairCells && pairCells.length === 1);
   if (pairCells && pairCells.length === 1) {
-    check('cell icon is map_thieves_stash.png', pairCells[0].icon === 'map_thieves_stash.png');
+    check('combat cell uses crossed swords', pairCells[0].icon === 'icon_in_combat.png');
     check('cell count is 1', pairCells[0].count === 1);
-    check('cell tier is 2', pairCells[0].tier === 2);
+    check('combat art has no tier outline', pairCells[0].tier === null && pairCells[0].outline === null);
   }
 
   // Two separate surface stashes yielding count 2
@@ -910,7 +910,7 @@ function testStashDeduplication() {
   check('two surface stashes yield 1 cell', twoStashesCells && twoStashesCells.length === 1);
   if (twoStashesCells && twoStashesCells.length === 1) {
     check('two surface stashes cell count is 2', twoStashesCells[0].count === 2);
-    check('two surface stashes cell tier is 2', twoStashesCells[0].tier === 2);
+    check('two surface stashes keep untiered combat art', twoStashesCells[0].tier === null);
   }
 }
 

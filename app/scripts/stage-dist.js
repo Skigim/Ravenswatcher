@@ -31,7 +31,7 @@ const STAGE = process.env.STAGE_DIR || path.join(ROOT, 'build', 'stage');
 // What ships, as an explicit copy rather than a package.json "files" glob,
 // so an omission is a missing file at startup rather than a silently
 // included one.
-const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'preload.js', 'external-links.js', 'update.js', 'history.js'];
+const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'preload.js', 'external-links.js', 'update.js', 'history.js', 'share.js'];
 const READER_SKIP = new Set(['test', 'bench', 'README.md']);
 const WEB_SKIP = new Set(['test']);
 // Reference content the app never reads: the decoded PNGs and the generated

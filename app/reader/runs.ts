@@ -21,10 +21,13 @@
 // a zero.
 
 import type { ByteSource } from './pe';
+import type { MelodySlotView } from './melodies';
 
 /** Mangled RTTI names, as resolveAllVtableRvas takes them (without the NUL). */
 export const RUN_CLASSES = {
   record: '.?AVoCDtCurrentRunProfileData@@',
+  controller: '.?AVoCDtEntityCpntHeroController@@',
+  smooth: '.?AVoCEntityCpntSmoothValue@@',
   hero: '.?AVoCDtEntityCpntHeroControllerPersistentData@@',
   skill: '.?AVoCDtEntityCpntSkillControllerPersistentData@@',
   settings: '.?AVoCDtEntityCpntSkillControllerSettings@@',
@@ -65,6 +68,7 @@ const RECORD = {
   playtime: 0x9C,
   level: 0xA0,
   objects: 0xE0,
+  objectCounts: 0xF0,
 } as const;
 
 /** Statistics page rows, grouped as the game groups them. All float32. */
@@ -131,7 +135,7 @@ export function stringAt(proc: ByteSource, field: number, maxLength = 1024): str
   if (length === 0) return '';
   if (data < 0x10000 || length > maxLength) throw new Error(`invalid string at ${hex(field)}`);
   const text = bytes(proc, data, length).toString('utf8').replace(/\0$/, '');
-  if (text.includes('�') || text.includes('\0')) throw new Error(`invalid UTF-8 at ${hex(field)}`);
+  if (text.includes('\uFFFD') || text.includes('\0')) throw new Error(`invalid UTF-8 at ${hex(field)}`);
   return text;
 }
 
@@ -161,6 +165,8 @@ export interface RunRecord {
   stats: RunStats;
   /** Magical object GUIDs, as the 16 bytes in memory order, hex. */
   objects: string[];
+  /** uint16 quantities parallel to objects; null means the counts could not be read. */
+  object_counts: number[] | null;
 }
 
 /** The hero's code from its definition path: Heroes\Juliet_Update6.herodef.ot -> Juliet. */
@@ -186,6 +192,17 @@ export function readRecord(proc: ByteSource, record: number, classOf: ClassOf): 
   const vec = vectorAt(proc, record + RECORD.objects, 256);
   for (let i = 0; i < vec.count; i++) objects.push(guidAt(proc, vec.ptr + i * 16));
 
+  // A failed quantity read must not lose the rest of the run. Keep unknown
+  // distinct from an empty inventory or a real zero quantity.
+  let objectCounts: number[] | null = null;
+  try {
+    const counts = vectorAt(proc, record + RECORD.objectCounts, 256);
+    if (counts.count === vec.count) {
+      const raw = counts.count ? bytes(proc, counts.ptr, counts.count * 2) : Buffer.alloc(0);
+      objectCounts = Array.from({ length: counts.count }, (_, i) => raw.readUInt16LE(i * 2));
+    }
+  } catch { /* quantities unavailable; the GUIDs and statistics remain valid */ }
+
   return {
     hero,
     hero_definition: definition,
@@ -193,6 +210,7 @@ export function readRecord(proc: ByteSource, record: number, classOf: ClassOf): 
     level: f32(proc, record + RECORD.level),
     stats: stats as unknown as RunStats,
     objects,
+    object_counts: objectCounts,
   };
 }
 
@@ -204,6 +222,63 @@ export function recordProblem(r: RunRecord): string | null {
   return null;
 }
 
+// Hero attributes reset before the persistent result book closes. Snapshot
+// these HUD display fields during play; do not read them after the end edge.
+export const HERO_STAT_NAMES = {
+  damage: 'AP Smooth Value', armor: 'Armour Smooth Value',
+  crit_chance: 'Crit Chance Smooth Value', crit_damage: 'Crit Damage Smooth Value',
+  vitality: 'Vitality Smooth Value',
+} as const;
+export type HeroStats = { -readonly [K in keyof typeof HERO_STAT_NAMES]: number };
+export interface HeroStatFields {
+  controller: number;
+  entity: number;
+  context: number;
+  fields: { [K in keyof HeroStats]: number };
+}
+export function findHeroStatFields(proc: ByteSource, hero: string, classOf: ClassOf, controllers: readonly number[]): HeroStatFields | null {
+  const matches: HeroStatFields[] = [];
+  for (const controller of controllers) {
+    if (classOf(controller) !== RUN_CLASSES.controller) continue;
+    try {
+      const entity = ptr(proc, controller + 8);
+      const context = ptr(proc, entity + 0x30);
+      if (!context || stringAt(proc, ptr(proc, entity + 0x28) + 8, 256) !== hero) continue;
+      const components = vectorAt(proc, entity + 0x190, 10000);
+      const fields: Partial<HeroStatFields['fields']> = {};
+      for (let i = 0; i < components.count; i++) {
+        const c = ptr(proc, components.ptr + i * 8);
+        if (classOf(c) !== RUN_CLASSES.smooth || ptr(proc, c + 8) !== entity) continue;
+        const name = stringAt(proc, ptr(proc, c + 0x10) + 0xE8, 256);
+        for (const [key, expected] of Object.entries(HERO_STAT_NAMES)) {
+          if (name !== expected) continue;
+          const stat = key as keyof HeroStats;
+          if (fields[stat] !== undefined) throw new Error('duplicate hero attribute');
+          fields[stat] = c + 0x130;
+        }
+      }
+      if (Object.keys(fields).length === Object.keys(HERO_STAT_NAMES).length) {
+        matches.push({ controller, entity, context, fields: fields as HeroStatFields['fields'] });
+      }
+    } catch { /* unsupported or stale entity; do not guess */ }
+  }
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+export function readHeroStats(proc: ByteSource, held: HeroStatFields, classOf: ClassOf): HeroStats {
+  if (classOf(held.controller) !== RUN_CLASSES.controller || ptr(proc, held.controller + 8) !== held.entity
+    || ptr(proc, held.entity + 0x30) !== held.context) throw new Error('stale hero attribute owner');
+  const stats = {} as HeroStats;
+  for (const [key, addr] of Object.entries(held.fields)) {
+    if (classOf(addr - 0x130) !== RUN_CLASSES.smooth || ptr(proc, addr - 0x130 + 8) !== held.entity) {
+      throw new Error('stale hero attribute field');
+    }
+    const value = f32(proc, addr);
+    if (!Number.isFinite(value)) throw new Error('invalid hero attribute');
+    stats[key as keyof HeroStats] = value;
+  }
+  return stats;
+}
+
 // --------------------------------------------------------------- talents --
 
 export interface Talent {
@@ -213,6 +288,9 @@ export interface Talent {
   key: string;
   rarity: string | null;
   rarity_code: number;
+  /** Already formatted by the game, including current numbers and markup. */
+  description?: string | null;
+  description_sampled_at?: string | null;
 }
 
 function localizedName(proc: ByteSource, payload: number, classOf: ClassOf): string | null {
@@ -237,6 +315,40 @@ function localizedName(proc: ByteSource, payload: number, classOf: ClassOf): str
   const name = stringAt(proc, texts.ptr + index * 16, 1024);
   if (!name) throw new Error('empty localized talent name');
   return name;
+}
+
+/** Runtime controllers owned by this hero entity, with no new heap scan. */
+export function findTalentRuntimes(proc: ByteSource, entity: number, classOf: ClassOf): number[] {
+  const components = vectorAt(proc, entity + 0x190, 10000);
+  const result: number[] = [];
+  for (let i = 0; i < components.count; i++) {
+    const runtime = ptr(proc, components.ptr + i * 8);
+    if (runtime && classOf(runtime) === RUN_CLASSES.runtime && ptr(proc, runtime + 8) === entity) result.push(runtime);
+  }
+  return result;
+}
+
+/** Missing or disagreeing live texts are unavailable, not guessed from a baseline. */
+export function talentDescription(proc: ByteSource, def: number, classOf: ClassOf, runtimes: readonly number[]): string | null {
+  const descriptions = new Set<string>();
+  for (const runtime of runtimes) {
+    try {
+      if (classOf(runtime) !== RUN_CLASSES.runtime || ptr(proc, runtime + 0x10) !== def) continue;
+      const entity = ptr(proc, runtime + 8);
+      if (!entity || !ptr(proc, entity + 0x30)) continue;
+      const text = stringAt(proc, runtime + 0x90, 8192);
+      if (text.trim()) descriptions.add(text);
+    } catch { /* a retired or unreadable runtime cannot erase the run */ }
+  }
+  return descriptions.size === 1 ? [...descriptions][0] ?? null : null;
+}
+
+/** Prefer the last in-run text over a potentially reset end-screen value. */
+export function retainTalentDescriptions(current: readonly Talent[], previous: readonly Talent[] | null): Talent[] {
+  return current.map(t => {
+    const old = previous?.find(p => p.key === t.key && p.rarity_code === t.rarity_code);
+    return old?.description ? { ...t, description: old.description, description_sampled_at: old.description_sampled_at ?? null } : { ...t };
+  });
 }
 
 /**
@@ -312,7 +424,8 @@ export function readTalents(
       if (only === undefined) throw new Error(`talent name unavailable or ambiguous for ${guid}`);
       name = only;
     }
-    return { name, key: stringAt(proc, def + 0xE8, 256), rarity: RARITY[rarityCode] ?? null, rarity_code: rarityCode };
+    return { name, key: stringAt(proc, def + 0xE8, 256), rarity: RARITY[rarityCode] ?? null, rarity_code: rarityCode,
+      description: talentDescription(proc, def, classOf, runtimes) };
   });
 }
 
@@ -391,6 +504,26 @@ export function scoreReady(baseline: ReadonlySet<number>, read: ScoreRead): bool
   return read.detail_buffer !== 0 && !baseline.has(read.detail_buffer);
 }
 
+/** History outlives the Live view's clearing on the summary/menu screen. */
+export interface RunMelodySnapshot {
+  melodies: MelodySlotView[] | null;
+  outsideRun: boolean;
+}
+export function nextRunMelodySnapshot(previous: RunMelodySnapshot, mapId: number | null,
+  reset: boolean, current: readonly MelodySlotView[] | null): RunMelodySnapshot {
+  if (mapId === null) return previous;
+  // A level reset on the end screen must not erase the run awaiting capture.
+  if (mapId < 0) return { melodies: previous.melodies, outsideRun: true };
+  const startsRun = previous.outsideRun || reset;
+  return {
+    outsideRun: false,
+    melodies: current === null ? (startsRun ? null : previous.melodies) : current.map(m => {
+      const old = !startsRun ? previous.melodies?.find(p => p.internal_name === m.internal_name && p.state === 'active' && p.notes === m.notes) : null;
+      return m.state === 'active' && m.notes_earned == null && old?.notes_earned != null ? { ...m, notes_earned: old.notes_earned } : { ...m };
+    }),
+  };
+}
+
 // --------------------------------------------------------------- summary --
 
 export type RunResult = 'defeat' | 'victory';
@@ -412,11 +545,16 @@ export interface RunSummary {
   level: number;
   score: { total: number; details: string[] } | null;
   talents: Talent[] | null;
+  hero_stats: HeroStats | null;
+  hero_stats_sampled_at: string | null;
+  melodies: MelodySlotView[] | null;
   damage: RunStats['damage'];
   support: RunStats['support'];
   sufferings: RunStats['sufferings'];
   resources: RunStats['resources'];
   objects: string[];
+  /** uint16 quantities parallel to objects; null means the counts could not be read. */
+  object_counts: number[] | null;
 }
 
 export interface RunContext {
@@ -427,7 +565,7 @@ export interface RunContext {
   chapter: number | null;
 }
 
-export function buildSummary(ctx: RunContext, record: RunRecord, talents: Talent[] | null): RunSummary {
+export function buildSummary(ctx: RunContext, record: RunRecord, talents: Talent[] | null, melodies: readonly MelodySlotView[] | null = null, heroStats: HeroStats | null = null, heroStatsAt: string | null = null): RunSummary {
   return {
     v: 1,
     id: ctx.id,
@@ -443,8 +581,12 @@ export function buildSummary(ctx: RunContext, record: RunRecord, talents: Talent
     level: record.level,
     score: null,
     talents,
+    hero_stats: heroStats === null ? null : { ...heroStats },
+    hero_stats_sampled_at: heroStatsAt,
+    melodies: melodies === null ? null : melodies.map(m => ({ ...m })),
     ...record.stats,
     objects: record.objects,
+    object_counts: record.object_counts,
   };
 }
 

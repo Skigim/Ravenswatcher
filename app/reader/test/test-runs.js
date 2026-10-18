@@ -56,6 +56,8 @@ function runFixture() {
   m.f32(record + 0x1C4, 3);           // death's doors
   m.f32(record + 0x1D8, 2);           // magical objects collected
   m.vec(record + 0xE0, objects, 2); m.guid(objects, 0xAB); m.guid(objects + 16, 0xCD);
+  m.vec(record + 0xF0, objects + 0x100, 2);
+  m.i32(objects + 0x100, 4 | (301 << 16)); // packed uint16, not byte or int32 stride
 
   m.vec(record + 0x10, components, 5); m.ptr(components, heroPersistent);
   m.vec(heroPersistent + 0xE8, chosen, 3);
@@ -101,12 +103,22 @@ function testRecord() {
   assert.deepStrictEqual(Object.keys(r.stats), ['damage', 'support', 'sufferings', 'resources']);
   assert.strictEqual(Object.keys(r.stats.damage).length, 10);
   assert.deepStrictEqual(r.objects, ['ab'.repeat(16), 'cd'.repeat(16)]);
+  assert.deepStrictEqual(r.object_counts, [4, 301]);
   assert.strictEqual(runs.recordProblem(r), null);
   assert.strictEqual(runs.heroCode(r.hero_definition), 'Fixture');
 
   assert.match(runs.recordProblem({ ...r, playtime_s: 0 }), /zero playtime/);
   assert.match(runs.recordProblem({ ...r, playtime_s: 20000 }), /out of range/);
   assert.match(runs.recordProblem({ ...r, level: 0 }), /level/);
+
+  f.i32(0x16100, 0 | (65535 << 16));
+  assert.deepStrictEqual(runs.readRecord(f.proc, f.record, f.classOf).object_counts, [0, 65535]);
+  f.vec(f.record + 0xF0, 0x16100, 1);
+  assert.strictEqual(runs.readRecord(f.proc, f.record, f.classOf).object_counts, null, 'mismatched vectors do not invent counts');
+  f.vec(f.record + 0xF0, 0x90000, 2);
+  assert.strictEqual(runs.readRecord(f.proc, f.record, f.classOf).object_counts, null, 'unreadable counts preserve the run');
+  f.vec(f.record + 0xE0, 0, 0); f.vec(f.record + 0xF0, 0, 0);
+  assert.deepStrictEqual(runs.readRecord(f.proc, f.record, f.classOf).object_counts, [], 'a known empty inventory');
 
   f.classes.delete(f.record);
   assert.throws(() => runs.readRecord(f.proc, f.record, f.classOf), /wrong run record class/);
@@ -145,6 +157,38 @@ function testTalents() {
   // A secondary-vtable hit on the settings is not a definition.
   f = runFixture(); f.ptr(f.settings[1] + 0x18, 0);
   assert.throws(() => talentsOf(f), /expected one Hero_Fixture definition/);
+}
+
+function testTalentDescriptions() {
+  const f = runFixture();
+  const runtime = 0x68000, entity = 0x69000, context = 0x6A000, list = 0x6B000;
+  f.classes.set(runtime, C.runtime); f.ptr(runtime + 8, entity);
+  f.ptr(runtime + 0x10, f.settings[1]); f.ptr(entity + 0x30, context);
+  const text = 'Fixture #ATTACK@ &+25%~; $-10* damage';
+  f.str(runtime + 0x90, text); f.runtimes.push(runtime);
+  f.vec(entity + 0x190, list, 3);
+  f.ptr(list, runtime); f.ptr(list + 8, 0x65000); f.ptr(list + 16, 0x66000);
+  assert.deepStrictEqual(runs.findTalentRuntimes(f.proc, entity, f.classOf), [runtime], 'roster contains only skill controllers owned by this hero');
+  assert.strictEqual(talentsOf(f)[0].description, text, 'formatted inline UTF-8 text preserves resolved numbers and markup');
+  assert.strictEqual(talentsOf(f)[1].description, null, 'missing text remains unknown');
+  f.ptr(entity + 0x30, 0);
+  assert.strictEqual(talentsOf(f)[0].description, null, 'retired context is refused');
+  f.ptr(entity + 0x30, context);
+  const other = runtime + 0x300;
+  f.classes.set(other, C.runtime); f.ptr(other + 8, entity); f.ptr(other + 0x10, f.settings[1]);
+  f.str(other + 0x90, 'Disagreeing effect'); f.runtimes.push(other);
+  assert.strictEqual(talentsOf(f)[0].description, null, 'disagreeing live descriptions are unknown');
+  f.str(other + 0x90, text);
+  assert.strictEqual(talentsOf(f)[0].description, text, 'identical live descriptions agree');
+  f.ptr(other + 0x10, f.settings[0]);
+  assert.strictEqual(talentsOf(f)[0].description, text, 'another talent cannot overwrite the selected one');
+
+  const old = { key: 'fixture', rarity_code: 2, description: 'Current damage: 25', description_sampled_at: 'fixture-time' };
+  const reset = { ...old, description: 'Current damage: 0', description_sampled_at: null };
+  assert.deepStrictEqual(runs.retainTalentDescriptions([reset], [old]), [old], 'end-screen reset retains in-run effect and sampling time');
+  assert.strictEqual(runs.retainTalentDescriptions([{ ...reset, rarity_code: 3 }], [old])[0].description, reset.description, 'an upgraded talent does not inherit the old rarity effect');
+  assert.strictEqual(runs.retainTalentDescriptions([reset], null)[0].description, reset.description, 'a real zero remains valid without an earlier sample');
+  assert.strictEqual(runs.retainTalentDescriptions([{ ...reset, description: null }], [old])[0].description, old.description, 'missing end-screen effect retains the sample');
 }
 
 // ----------------------------------------------------------------- score --
@@ -234,6 +278,18 @@ function testEdgeAndSummary() {
   assert.strictEqual(s.talents.length, 3);
   assert.strictEqual(s.damage.total, record.stats.damage.total);
   assert.deepStrictEqual(s.objects, record.objects);
+  assert.deepStrictEqual(s.object_counts, [4, 301]);
+  assert.strictEqual(s.melodies, null, 'unread melodies stay unavailable');
+  const melody = { slot: 0, internal_name: 'fixture', name: 'Fixture Melody', icon: 'fixture.png', notes: 4, state: 'active', effect: 'Fixture' };
+  const withMelody = runs.buildSummary({ id, result: 'victory', difficulty: 1, map: 3, chapter: 3 }, record, [], [melody]);
+  melody.state = 'locked';
+  assert.strictEqual(withMelody.melodies[0].state, 'active', 'the summary owns its melody snapshot');
+  const stats = { vitality: 92, damage: 247, armor: 311, crit_chance: 5, crit_damage: 50 };
+  const withStats = runs.buildSummary({ id, result: 'victory', difficulty: 1, map: 3, chapter: 3 }, record, [], null, stats, '2026-10-17T19:30:00.000Z');
+  stats.armor = 0;
+  assert.strictEqual(withStats.hero_stats.armor, 311, 'the summary owns its hero attribute snapshot');
+  assert.strictEqual(withStats.hero_stats_sampled_at, '2026-10-17T19:30:00.000Z');
+  assert.strictEqual(s.hero_stats, null, 'unread hero attributes stay unavailable');
   JSON.parse(JSON.stringify(s));
 
   // The frame carries it on one frame and null otherwise.
@@ -248,9 +304,88 @@ function testEdgeAndSummary() {
   assert.ok(runs.RUN_VALUE_NAMES.includes('Current map id'));
 }
 
+function testHeroStats() {
+  const m = memory(0x40000);
+  const controller = 0x11000, entity = 0x12000, settings = 0x13000, context = 0x14000, list = 0x15000;
+  m.classes.set(controller, C.controller); m.ptr(controller + 8, entity);
+  m.ptr(entity + 0x28, settings); m.str(settings + 8, 'Hero_Fixture_Skin');
+  m.ptr(entity + 0x30, context);
+  const values = { vitality: 0, damage: 247, armor: -10, crit_chance: 5, crit_damage: 50 };
+  m.vec(entity + 0x190, list, 5);
+  Object.entries(runs.HERO_STAT_NAMES).forEach(([key, name], i) => {
+    const c = 0x17000 + i * 0x300, settings = 0x25000 + i * 0x300;
+    m.ptr(list + i * 8, c); m.classes.set(c, C.smooth);
+    m.ptr(c + 8, entity); m.ptr(c + 0x10, settings); m.str(settings + 0xE8, name);
+    m.f32(c + 0x130, values[key]);
+  });
+  const fields = runs.findHeroStatFields(m.proc, 'Hero_Fixture_Skin', m.classOf, [controller]);
+  assert.ok(fields);
+  assert.deepStrictEqual(runs.readHeroStats(m.proc, fields, m.classOf), values, 'display floats, including real zero and negative armor');
+  assert.strictEqual(runs.findHeroStatFields(m.proc, 'Hero_Other', m.classOf, [controller]), null);
+  assert.strictEqual(runs.findHeroStatFields(m.proc, 'Hero_Fixture_Skin', m.classOf, [controller, controller]), null, 'ambiguous owners are refused');
+  m.ptr(entity + 0x30, 0);
+  assert.strictEqual(runs.findHeroStatFields(m.proc, 'Hero_Fixture_Skin', m.classOf, [controller]), null, 'orphaned scene owners are refused');
+  assert.throws(() => runs.readHeroStats(m.proc, fields, m.classOf), /stale/);
+  m.ptr(entity + 0x30, context);
+  m.f32(fields.fields.vitality, NaN);
+  assert.throws(() => runs.readHeroStats(m.proc, fields, m.classOf), /invalid/);
+  m.classes.delete(0x17000);
+  assert.strictEqual(runs.findHeroStatFields(m.proc, 'Hero_Fixture_Skin', m.classOf, [controller]), null, 'partial stats stay unavailable');
+}
+
+function testRunMelodyRetention() {
+  const { Reader } = require('../reader');
+  const melody = { slot: 0, internal_name: 'fixture', name: 'Fixture', icon: 'fixture.png', notes: 4, effect: 'Fixture', state: 'locked' };
+  let snapshot = { melodies: null, outsideRun: true };
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 0, true, [melody]);
+  melody.state = 'active';
+  assert.strictEqual(snapshot.melodies[0].state, 'locked', 'live update is copied');
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 0, false, [melody]);
+  assert.strictEqual(snapshot.melodies[0].state, 'active');
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 1, false, null);
+  assert.strictEqual(snapshot.melodies[0].state, 'active', 'chapter transition/read outage keeps this run');
+  melody.state = 'completed';
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 3, false, [melody]);
+  snapshot = runs.nextRunMelodySnapshot(snapshot, -1, true, null);
+  snapshot = runs.nextRunMelodySnapshot(snapshot, -1, false, null);
+  snapshot = runs.nextRunMelodySnapshot(snapshot, null, false, null);
+  assert.strictEqual(snapshot.melodies[0].state, 'completed', 'end-screen reset and unknown map keep the final snapshot');
+  const recorded = snapshot.melodies.map(m => ({ ...m }));
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 0, false, null);
+  assert.strictEqual(snapshot.melodies, null, 'new run clears previous melodies even without a level-reset signal');
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 0, false, [melody]);
+  snapshot = runs.nextRunMelodySnapshot(snapshot, 0, true, null);
+  assert.strictEqual(snapshot.melodies, null, 'same-map restart clears previous melodies');
+  assert.strictEqual(recorded[0].state, 'completed', 'recorded snapshot survives a new run');
+
+  const active = { ...melody, state: 'active', notes_earned: 2 };
+  let counted = runs.nextRunMelodySnapshot({ melodies: null, outsideRun: true }, 0, false, [active]);
+  counted = runs.nextRunMelodySnapshot(counted, 0, false, [{ ...active, notes_earned: null }]);
+  assert.strictEqual(counted.melodies[0].notes_earned, 2, 'brief unreadable counter retains this melody progress');
+  counted = runs.nextRunMelodySnapshot(counted, 0, false, [{ ...active, notes_earned: 0 }]);
+  assert.strictEqual(counted.melodies[0].notes_earned, 0, 'known zero replaces previous progress');
+  counted = runs.nextRunMelodySnapshot(counted, 0, false, [{ ...active, internal_name: 'another', notes_earned: null }]);
+  assert.strictEqual(counted.melodies[0].notes_earned, null, 'another melody cannot inherit progress');
+  counted = runs.nextRunMelodySnapshot(counted, 0, true, [{ ...active, notes_earned: null }]);
+  assert.strictEqual(counted.melodies[0].notes_earned, null, 'next run cannot inherit a count');
+
+  const posted = [];
+  const reader = Object.create(Reader.prototype);
+  reader.runsWorker = { postMessage: m => posted.push(m) };
+  reader.sandmanWorker = reader.tilesWorker = { postMessage() {} };
+  reader.clearRun();
+  assert.deepStrictEqual(posted, [], 'clearing Live at map -1 cannot clear the History worker');
+  reader._lastRelayedRunValues = '{}';
+  reader._handleSweepMessage({ type: 'sweep', found: {}, mapId: -1, melodies: null, runReset: true });
+  assert.deepStrictEqual(posted, [{ type: 'melodies', melodies: null, mapId: -1, reset: true }], 'sweep relays the map context needed to distinguish end from next run');
+}
+
 function main() {
+  testRunMelodyRetention();
   testRecord();
+  testHeroStats();
   testTalents();
+  testTalentDescriptions();
   testScore();
   testEdgeAndSummary();
   console.log('test-runs: ok');

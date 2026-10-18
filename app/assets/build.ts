@@ -19,6 +19,7 @@ import * as path from 'path';
 import { parseTexture } from './texture';
 import { encodePng } from './png';
 import { buildTables, readCooked, Tables } from './tables';
+import { buildHistoryArt } from './history-art';
 
 export const CACHE_DIR_NAME = 'game-assets';
 const COOKING = ['DarkTalesResources', '_Cooking'];
@@ -56,7 +57,8 @@ export function texturePath(uiPath: string): string {
 
 export function buildAssets(opts: BuildOptions): Tables {
   const cookingDir = path.join(opts.installDir, ...COOKING);
-  const rows = readManifest(opts.manifestPath);
+  const art = buildHistoryArt(cookingDir);
+  const rows = [...readManifest(opts.manifestPath), ...art.rows];
   const iconAssets = new Map(rows.map((r) => [r.uiPath, r.asset]));
 
   const tmp = opts.cacheDir + '.tmp';
@@ -68,7 +70,7 @@ export function buildAssets(opts: BuildOptions): Tables {
       const tex = parseTexture(readCooked(cookingDir, rel), rel);
       fs.writeFileSync(path.join(tmp, 'icons', asset), encodePng(tex.width, tex.height, tex.rgba));
     }
-    const tables = buildTables(cookingDir, iconAssets, opts.lang);
+    const tables = { ...buildTables(cookingDir, iconAssets, opts.lang), ...art.tables };
     fs.writeFileSync(path.join(tmp, 'tables.json'), JSON.stringify(tables));
 
     const old = opts.cacheDir + '.old';

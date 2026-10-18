@@ -17,6 +17,7 @@ import type { ClassOf, RunResult, RunSummary } from './runs';
 import { pollBinding } from './values';
 import type { ByteSource } from './pe';
 import type { ScanSource } from './scan';
+import type { MelodySlotView } from './melodies';
 import * as rtti from './rtti';
 import { scanPointers } from './scan';
 import { CURRENT_MAP_ID } from './state';
@@ -40,7 +41,8 @@ interface WorkerProcess extends ByteSource, ScanSource {
 export interface ValueBinding { addr: number; variant: string | null; is_float: boolean }
 
 /** What Reader posts to this worker: the bindings of the values it polls. */
-type RunsWorkerMessage = { type: 'values'; bindings: Record<string, ValueBinding> };
+type RunsWorkerMessage = { type: 'values'; bindings: Record<string, ValueBinding> }
+  | { type: 'melodies'; melodies: MelodySlotView[] | null; mapId: number | null; reset?: boolean };
 
 function post(m: unknown): void {
   if (parentPort) parentPort.postMessage(m);
@@ -79,9 +81,24 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   }
 
   let bindings: Record<string, ValueBinding> = {};
+  let melodySnapshot: runs.RunMelodySnapshot = { melodies: null, outsideRun: true };
+  let heroFields: runs.HeroStatFields | null = null;
+  let lastHeroStats: runs.HeroStats | null = null;
+  let lastHeroStatsAt: string | null = null;
+  let lastHeroFind = 0;
+  let talentEntity = 0;
+  let talentRuntimes: number[] = [];
+  let lastTalents: runs.Talent[] | null = null;
+  let lastTalentRead = 0;
+  let lastTalentFind = 0;
   if (parentPort) {
     parentPort.on('message', (m: RunsWorkerMessage) => {
       if (m && m.type === 'values') bindings = m.bindings;
+      if (m && m.type === 'melodies') {
+        const startsRun = m.mapId !== null && m.mapId >= 0 && (m.reset || melodySnapshot.outsideRun);
+        if (startsRun) { heroFields = null; lastHeroStats = null; lastHeroStatsAt = null; lastHeroFind = 0; talentEntity = 0; talentRuntimes = []; lastTalents = null; lastTalentRead = 0; lastTalentFind = 0; }
+        melodySnapshot = runs.nextRunMelodySnapshot(melodySnapshot, m.mapId, !!m.reset, m.melodies);
+      }
     });
     parentPort.unref();
   }
@@ -133,10 +150,11 @@ export async function runWorker(pid: number, base: number): Promise<void> {
           if (problem) { problems.push(problem); continue; }
           let talents: runs.Talent[] | null = null;
           try {
-            talents = runs.readTalents(proc, record, classOf,
-              scan(runs.RUN_CLASSES.settings), scan(runs.RUN_CLASSES.runtime));
+            talents = runs.retainTalentDescriptions(runs.readTalents(proc, record, classOf,
+              scan(runs.RUN_CLASSES.settings), scan(runs.RUN_CLASSES.runtime)), lastTalents);
           } catch (e) {
-            post({ type: 'diagnostic', message: 'run talents not read: ' + message(e) });
+            talents = lastTalents === null ? null : lastTalents.map(t => ({ ...t }));
+            post({ type: 'diagnostic', message: 'run-end talent read failed' + (talents === null ? ': ' : '; using last in-run snapshot: ') + message(e) });
           }
           const difficulty = value(runs.GAME_DIFFICULTY);
           const chapter = value(runs.CURRENT_CHAPTER);
@@ -145,7 +163,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
             difficulty: difficulty ?? lastDifficulty,
             map: lastMap,
             chapter: chapter ?? lastChapter,
-          }, r, talents);
+          }, r, talents, melodySnapshot.melodies, lastHeroStats, lastHeroStatsAt);
         } catch (e) {
           problems.push(message(e));
         }
@@ -218,6 +236,8 @@ export async function runWorker(pid: number, base: number): Promise<void> {
       if (!inSummary && !pending) {
         const map = value(CURRENT_MAP_ID);
         if (map !== null && map !== -1) {
+          if (lastMap === null) { lastHeroStats = null; lastHeroStatsAt = null; lastTalents = null; }
+          if (lastMap !== map) { heroFields = null; lastHeroFind = 0; lastHeroStats = null; lastHeroStatsAt = null; talentEntity = 0; talentRuntimes = []; lastTalents = null; lastTalentFind = 0; }
           lastMap = map;
           lastDifficulty = value(runs.GAME_DIFFICULTY) ?? lastDifficulty;
           lastChapter = value(runs.CURRENT_CHAPTER) ?? lastChapter;
@@ -225,6 +245,45 @@ export async function runWorker(pid: number, base: number): Promise<void> {
         // Hold the record. Re-find only when no held address validates.
         records = records.filter(a => classOf(a) === runs.RUN_CLASSES.record);
         if (!records.length && Date.now() - lastFind >= RECORD_FIND_MS) findRecords();
+        if (map !== null && map >= 0) {
+          try {
+            if (!heroFields && Date.now() - lastHeroFind >= RECORD_FIND_MS) {
+              lastHeroFind = Date.now();
+              const record = records.length === 1 ? records[0] : undefined;
+              if (record !== undefined) {
+                const settings = proc.readPtr(record + 0x20);
+                const hero = settings ? runs.stringAt(proc, settings + 8, 256) : '';
+                heroFields = runs.findHeroStatFields(proc, hero, classOf, scan(runs.RUN_CLASSES.controller));
+              }
+            }
+            if (heroFields) {
+              lastHeroStats = runs.readHeroStats(proc, heroFields, classOf);
+              lastHeroStatsAt = new Date().toISOString();
+              // All talent runtimes already exist on the hero. Cache that roster;
+              // sample only selected talents every 500 ms on this worker.
+              if (Date.now() - lastTalentRead >= 500) {
+                lastTalentRead = Date.now();
+                try {
+                  if (talentEntity !== heroFields.entity && Date.now() - lastTalentFind >= RECORD_FIND_MS) {
+                    lastTalentFind = Date.now();
+                    talentRuntimes = runs.findTalentRuntimes(proc, heroFields.entity, classOf);
+                    talentEntity = heroFields.entity;
+                  }
+                  const record = records.length === 1 ? records[0] : undefined;
+                  if (record !== undefined && talentEntity === heroFields.entity) {
+                    const settings = [...new Set(talentRuntimes.map(rt => proc.readPtr(rt + 0x10)).filter((a): a is number => a !== null && a !== 0))];
+                    const current = runs.readTalents(proc, record, classOf, settings, talentRuntimes);
+                    lastTalents = current.map(t => {
+                      const old = lastTalents?.find(p => p.key === t.key && p.rarity_code === t.rarity_code);
+                      return { ...t, description: t.description || old?.description || null,
+                        description_sampled_at: t.description ? new Date().toISOString() : old?.description_sampled_at ?? null };
+                    });
+                  }
+                } catch { talentEntity = 0; }
+              }
+            }
+          } catch { heroFields = null; }
+        }
       }
 
       const edge = runs.endEdge(prevFlags, flags);

@@ -34,11 +34,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { decodeName, encodeName } from './cipher';
+import type { HistoryArtTables } from './history-art';
 
-export interface Tables {
+export interface Tables extends HistoryArtTables {
   ITEM_TEXT: Record<string, string>;
   SHOP_ICONS: Record<string, string>;
   ITEM_NAMES: Record<string, string>;
+  /** Run-record GUID bytes in memory order -> the same name key the shop uses. */
+  OBJECT_KEYS: Record<string, string>;
+  OBJECT_RARITIES: Record<string, string>;
 }
 
 const TEXT_FILE = 'Text/Magical_Objects~GAM.xls.LocalText.gen';
@@ -189,7 +193,7 @@ function resolve(short: string, defs: Map<string, Buffer>, text: Map<string, str
   return found[0] ?? [short, null];
 }
 
-function definitions(cookingDir: string): Map<string, Buffer> {
+function definitions(cookingDir: string, rarities: Map<string, string>): Map<string, Buffer> {
   const defs = new Map<string, Buffer>();
   for (const name of listCooked(cookingDir, DEFINITIONS_DIR)) {
     if (!name.startsWith('Magical_Objects!') || !name.endsWith('.gen')) continue;
@@ -197,6 +201,8 @@ function definitions(cookingDir: string): Map<string, Buffer> {
     const tail = name.slice(name.lastIndexOf('!') + 1);
     const short = tail.slice(0, tail.indexOf('.'));
     defs.set(short, readCooked(cookingDir, `${DEFINITIONS_DIR}/${name}`));
+    const rarity = name.split('!')[1];
+    if (rarity) rarities.set(short, rarity);
   }
   if (defs.size === 0) throw new Error(`no Magical_Objects definitions under ${DEFINITIONS_DIR}`);
   return defs;
@@ -214,8 +220,17 @@ function liveNames(cookingDir: string, defs: Map<string, Buffer>): Set<string> {
   return listed;
 }
 
+/** Component identity immediately before the serialized Magical Object data name. */
+function objectGuid(blob: Buffer, short: string): string | null {
+  const marker = /\x22\x22\xbb\xaa([\s\S]{16})\x16\x00\x00\x00Dt Magical Object Data/g;
+  const found = [...blob.toString('latin1').matchAll(marker)];
+  if (found.length > 1) throw new Error(`${short}: ambiguous Magical Object GUID`);
+  const guid = found[0]?.[1];
+  return guid === undefined ? null : Buffer.from(guid, 'latin1').toString('hex');
+}
+
 /**
- * The three tables from a cooked tree. `iconAssets` maps a Ui_png path
+ * The item tables and GUID join from a cooked tree. `iconAssets` maps a Ui_png path
  * ("Objects/Icon_Read_Dream.png") to the asset name the page draws it as.
  */
 export function buildTables(cookingDir: string, iconAssets: Map<string, string>, lang = 'EN'): Tables {
@@ -233,18 +248,31 @@ export function buildTables(cookingDir: string, iconAssets: Map<string, string>,
     text.set(k, t);
   });
 
-  const defs = definitions(cookingDir);
+  const rarities = new Map<string, string>();
+  const defs = definitions(cookingDir, rarities);
   const live = liveNames(cookingDir, defs);
 
   // key -> [definition, display name, description, icon]. Three tier
   // variants resolve to one model and land here three times; two distinct
   // definitions under one name must agree or the build stops.
   const rows = new Map<string, [string, string, string | null, string | null]>();
+  const OBJECT_KEYS: Record<string, string> = {};
+  const OBJECT_RARITIES: Record<string, string> = {};
   for (const listed of [...live].sort()) {
     const [short, row] = resolve(listed, defs, text);
     if (row === null) continue;
     const [name, desc, icon] = row;
     const k = itemKey(name);
+    // Read identity from the listed variant, even when text/art are inherited.
+    const guid = objectGuid(must(defs, listed), listed);
+    if (guid !== null) {
+      if (OBJECT_KEYS[guid] !== undefined && OBJECT_KEYS[guid] !== k) {
+        throw new Error(`${listed}: duplicate Magical Object GUID ${guid}`);
+      }
+      OBJECT_KEYS[guid] = k;
+      const rarity = rarities.get(listed);
+      if (rarity) OBJECT_RARITIES[guid] = rarity;
+    }
     const have = rows.get(k);
     if (have && have[0] !== short && (have[2] !== desc || have[3] !== icon)) {
       throw new Error(`${JSON.stringify(name)}: ${have[0]} and ${short} are both live and disagree on description or icon`);
@@ -268,5 +296,5 @@ export function buildTables(cookingDir: string, iconAssets: Map<string, string>,
   if (unimported.length) {
     throw new Error(`${unimported.length} live objects draw a texture with no manifest row; add each to SOURCES.tsv:\n${unimported.join('\n')}`);
   }
-  return { ITEM_TEXT, SHOP_ICONS, ITEM_NAMES };
+  return { ITEM_TEXT, SHOP_ICONS, ITEM_NAMES, OBJECT_KEYS, OBJECT_RARITIES, HERO_ICONS: {}, DIFFICULTY_ICONS: {}, TALENT_ICONS: {} };
 }

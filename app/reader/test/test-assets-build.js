@@ -53,10 +53,13 @@ function main() {
     assert.strictEqual(texturePath('MiniMap/Icons/High/Minimap_IconHigh_Chest.png'), 'Ui/MiniMap/Icons!High!Minimap_IconHigh_Chest.png.Texture.dxt');
     assert.deepStrictEqual(readManifest(manifest)[0], { asset: 'item_a.png', uiPath: 'Objects/Icon_Object_A.png' });
 
+    writeCooked(cooking, 'Definitions/Heroes/Fixture.herodef.ot.DtHeroDefinition.gen', Buffer.from('Heroes\\Fixture\\Portrait_Fixture.png'));
+    writeCooked(cooking, 'Ui/Heroes/Fixture!Portrait_Fixture.png.Texture.dxt', rgba8Container(1, 1, Buffer.from([1, 2, 3, 255])));
     const tables = buildAssets({ installDir: install, cacheDir, manifestPath: manifest });
     assert.strictEqual(tables.ITEM_NAMES.adamant, 'Adamant');
     const icons = fs.readdirSync(path.join(cacheDir, 'icons')).sort();
-    assert.deepStrictEqual(icons, ['item_a.png', 'item_b.png', 'item_d.png', 'item_devil_pocket_full.png', 'map_chest.png']);
+    assert.deepStrictEqual(icons, [tables.HERO_ICONS.Fixture, 'item_a.png', 'item_b.png', 'item_d.png', 'item_devil_pocket_full.png', 'map_chest.png'].sort());
+    assert.ok(tables.HERO_ICONS.Fixture.startsWith('history_'), 'portrait goes through the shared icon cache');
     const png = fs.readFileSync(path.join(cacheDir, 'icons', 'item_a.png'));
     assert.deepStrictEqual([...png.subarray(1, 4)], [80, 78, 71]);
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(cacheDir, 'tables.json'), 'utf8')), tables);

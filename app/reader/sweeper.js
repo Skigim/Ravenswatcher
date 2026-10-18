@@ -409,7 +409,8 @@ async function main(pid, base) {
         if (pool) {
           const states = melodies.readStates(
             proc, melodyVtables, pool, melodyRegistry, heroes);
-          melodiesData = melodies.combineMelodies(pool, states);
+          const progress = melodies.readProgress(proc, melodyVtables, pool, states, melodyRegistry, heroes);
+          melodiesData = melodies.combineMelodies(pool, states, progress);
         }
       } catch {
         melodiesData = null;

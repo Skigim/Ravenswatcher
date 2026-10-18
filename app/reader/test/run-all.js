@@ -1,6 +1,8 @@
 'use strict';
 // Every test in this prototype. None of them attach to Ravenswatch.exe.
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { spawnSync } = require('child_process');
 
 const SUITES = [
@@ -17,6 +19,7 @@ const SUITES = [
   ['test-reattach', () => require('./test-reattach').main()],
   ['test-worker-lifecycle', () => require('./test-worker-lifecycle').main()],
   ['test-melodies', () => require('./test-melodies').main()],
+  ['test-melody-progress', () => require('./test-melody-progress').main()],
   ['test-sandman', () => require('./test-sandman').main()],
   ['test-tiles', () => require('./test-tiles').main()],
   ['test-tiles-view', () => require('./test-tiles-view').main()],
@@ -28,11 +31,13 @@ const SUITES = [
   ['test-assets-png', () => require('./test-assets-png').main()],
   ['test-assets-tables', () => require('./test-assets-tables').main()],
   ['test-assets-build', () => require('./test-assets-build').main()],
+  ['test-history-art', () => require('./test-history-art').main()],
   ['test-no-shipped-content', () => require('./test-no-shipped-content').main()],
   ['test-coop', () => require('./test-coop').main()],
   ['test-update', () => require('./test-update').main()],
   ['test-runs', () => require('./test-runs').main()],
   ['test-history', () => require('./test-history').main()],
+  ['test-history-deletion', () => require('./test-history-deletion').main()],
 ];
 
 // Suites that cannot run in this process. test-seams drives the real page in
@@ -45,6 +50,10 @@ const SPAWNED = [
   ['test-hover', path.join(__dirname, '..', '..', 'web', 'test', 'test-hover.js')],
   ['test-tile-done', path.join(__dirname, '..', '..', 'web', 'test', 'test-tile-done.js')],
   ['test-update-bar', path.join(__dirname, '..', '..', 'web', 'test', 'test-update-bar.js')],
+  ['test-history-delete', path.join(__dirname, '..', '..', 'web', 'test', 'test-history-delete.js')],
+  ['test-share-run', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
+  ['test-share-run-scale1.5', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
+  ['test-share-run-scale2', path.join(__dirname, '..', '..', 'web', 'test', 'test-share-run.js')],
   ['test-history-view', path.join(__dirname, '..', '..', 'web', 'test', 'test-history-view.js')],
 ];
 
@@ -99,11 +108,20 @@ function runSpawned(name, entry, electron) {
     return 1;
   }
   console.log(`\n--- ${name} (spawned under Electron) ---`);
-  const res = spawnSync(electron, [entry], {
-    stdio: 'inherit',
-    timeout: SPAWN_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-  });
+  // Deletion tests get a disposable profile and database owned by this parent.
+  // Windows holds the profile open until Electron exits, so clean it here.
+  const fixtureDir = name === 'test-history-delete' ? fs.mkdtempSync(path.join(os.tmpdir(), 'rw-delete-ui-')) : name.startsWith('test-share-run') ? fs.mkdtempSync(path.join(os.tmpdir(), 'rw-share-ui-')) : null;
+  let res;
+  try {
+    res = spawnSync(electron, name.startsWith('test-share-run-scale') ? [entry, '--scale='+name.slice('test-share-run-scale'.length)] : [entry], {
+      stdio: 'inherit',
+      timeout: SPAWN_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      env: fixtureDir ? { ...process.env, RW_DELETE_TEST_DIR: fixtureDir, RW_SHARE_TEST_DIR: fixtureDir } : process.env,
+    });
+  } finally {
+    if (fixtureDir) fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
   if (res.error) {
     if (res.error.code === 'ETIMEDOUT') {
       console.log(`${name}: TIMED OUT after ${SPAWN_TIMEOUT_MS / 1000}s and was `

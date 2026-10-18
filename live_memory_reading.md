@@ -723,7 +723,33 @@ AP/Armour/Crit Chance/Crit Damage/Vitality).
 
 This is a read path only. No write into the chain reaches the HUD or the
 combat math; the attempts and their measurements are in `ruled_out.md`
-under "Hero build stats". The stats are not part of the readout.
+under "Hero build stats".
+
+On October 17 the player approved a targeted read of these five attributes
+with the Kintaro victory Statistics screen still open. The valid, scene-owned
+controller returned AP/Armour/Vitality = 0, Crit Chance = 5, Crit Damage = 50;
+the `Last ... Smooth Value` listener values agreed. An orphaned same-skin
+controller had a null scene context and was rejected. These are reset HUD
+values, not the final Statistics-page snapshot. The supplied screenshot
+shows Vitality 92, Damage 247, Armour 311, Crit Chance 5, Crit Damage 50.
+No broader end-screen search was performed.
+
+The runs worker now discovers the five named smooth components on the
+run record's matching hero skin, requires a unique live owner, and holds
+validated component addresses. While in a run and before an end flag, it
+samples `+0x130` every 250 ms and saves the last sample and its timestamp
+in `hero_stats` / `hero_stats_sampled_at`. Map changes and run resets clear
+this snapshot. Missing, ambiguous or stale owners remain unavailable.
+Synthetic fixtures cover the reader and snapshot ownership. Capturing
+final Statistics-page-equivalent attributes through a real run end is
+still unverified; transient buffs and the reset timing may differ.
+
+The existing Kintaro history row was restored from the player's screenshot
+with `hero_stats_source: "player-screenshot"` and no invented sample time.
+Its object quantities were restored from the saved, screen-verified GUID
+and uint16 vectors. The SQLite database was backed up first; all six run
+IDs and the original JSONL were preserved. Evidence and the restoration
+audit remain in the private research checkout.
 
 ## The run record
 
@@ -763,6 +789,31 @@ Fields matched against the summary screen, as record offsets:
 | Death's doors | `+0x1C4` | float |
 | Dream shards amassed | `+0x1CC` | float |
 | Magical objects collected | `+0x1D8` | float |
+
+
+Magical object identity was joined on October 17, 2026: each 16-byte GUID
+in the record's `+0xE0` vector occurs verbatim in its cooked EntitySettings
+resource, immediately before the length-prefixed component name
+`Dt Magical Object Data`. The serialized boundary is `22 22 bb aa`, the
+16 GUID bytes, `16 00 00 00`, then the component name. Use the bytes in
+memory order, without UUID byte swapping. All five GUIDs from the October
+16 reference run matched distinct definitions. Their own text and texture
+references then supply the name and icon, through the same inheritance
+rules as `app/assets/tables.ts`. The private corpus yielded 114 unique
+GUIDs; that includes old definitions, so runtime tables must still select
+shipped definitions through the version resource.
+
+Stack counts are screen-verified on the October 17 victory. Record `+0xF0`
+is a vector header whose buffer holds packed uint16 little-endian quantities,
+indexed in parallel with the 16-byte GUID vector at `+0xE0`. All 15 entries
+matched the supplied inventory screenshot: 4,4,1,1,1,1,3,4,1,2,1,1,1,1,1,
+totaling 27. Read GUID i at GUID-buffer + i*16 and quantity i at count-buffer
++ i*2; require equal vector lengths and keep each pair together when sorting.
+This confirms one complete inventory, not arbitrary future layouts. The
+reader now persists parallel `object_counts` and GUID arrays; unreadable or
+mismatched quantity vectors produce null counts without losing the run.
+History resolves GUIDs through runtime item tables and renders names, icons,
+shop tooltips, and quantities. Legacy captures retain unknown quantities.
 
 The damage, support, sufferings, and resources rows sit at consecutive
 floats from `+0x180` to `+0x1D8`, in the order the statistics page lists
@@ -919,6 +970,30 @@ listener `+0x08` yielded Rikishi. Require the available matching listeners
 to agree on one nonempty name. Missing or ambiguous names are failed or
 deferred reads, not silently omitted talents.
 
+**Formatted description (October 17, 2026 research):** the matched runtime
+`oCDtEntityCpntSkillController` has a description
+`oCEntityCpntStringFormatValue` pointer at `+0x88`, followed by an **inline
+UTF-8 string header at `+0x90`**. Read the latter with the existing bounded
+string reader. It is not a pointer to another RTTI-classified object.
+Direct reads returned the complete game-formatted Unchained Beast, Bold
+Strike and Raijin Axe descriptions, including current damage and converted
+percentage values. Preserve or safely render the game's markup; do not
+strip numeric placeholders and lose their values. Join only the persistent
+selected GUIDs to the unique matching runtime, using the ownership rules
+above. A missing or conflicting description remains unavailable.
+
+The sibling wiki-data 1.06 talent traces cross-check Unchained Beast's
+Common +100% and Bold Strike's Common 200%. Raw ratios and displayed units
+must be distinguished: the player confirmed Raijin Axe's raw 0.01 ratio is
+its displayed 1 percent. Wiki baseline damage is not current in-run damage.
+The direct string makes a new template evaluator unnecessary for newly
+captured runs. The staged reader samples selected talent descriptions every
+500 ms from the held hero component roster, retaining the last valid string
+and its sample time per talent key and rarity. The end capture prefers that
+in-run string over a reset display value. It is stored in the run payload,
+with icon, rarity and safely displayed text in the hover. No app rebuild
+occurred during this live research.
+
 The five joined rarities were Epic, Common, Common, Common, Ultimate
 (2,0,0,0,4), independently matching Statistics' bound skill viewers.
 Selection comes from the persistent GUID list, not UI subscription counts.
@@ -944,6 +1019,46 @@ Rare=1 is the player's statement of the game's rarity order, not a screen
 match. Delegated names are taken as available at the flag, like the
 ordinary names Scarlet's capture read on the first attempt. Victory is
 untested.
+
+## Melody earned-note research (October 17, 2026)
+
+The player independently confirmed Galahad **0/4**. The existing targeted
+watcher subsequently recorded **3/4** in the native-used counter; that
+nonzero value was not separately screen-confirmed. Switching to another
+active melody was subsequently observed: both Galahad and Fairy Godmother
+completed, followed by Merry Men at 0/5 and then 1/5. These are memory
+observations, not independent nonzero screen checks. At the run end, a private
+worker using the staged source retained all five attributes, ten selected
+talent effects, and the same melody snapshot as the independent last-active
+sample. The full typecheck and test suite passed before rebuilding.
+
+The native melody completion handler reads progress through hero controller
+`+0x1DA8`. Progress data `+0x48` is a vector of 24-byte entries (count at
+`+0x50`, capacity at `+0x54`). The handler matches uint32 event ID
+`0xC978D974` at entry `+0x08` and reads a **uint16** count at entry `+0x0C`.
+If no matching entry exists, that routine uses zero. An unreadable vector
+must remain unknown. The component's `+0x168` points to a
+`MelodyDefinition`, whose int32 `+0x320` is its required-note total.
+Galahad read 0/4 and the player independently confirmed that count.
+Lifecycle remains the component's int32 `+0x68`.
+
+This progress belongs to the active hero/melody context, not every melody
+in the pool. Completed History entries should say Completed; active entries
+need a per-melody earned/required snapshot. Do not infer an earned zero for
+old records which lack that field. Counter behavior on another melody and
+pre-end snapshot retention were checked through the October 17 Kintaro
+victory: the staged capture retained Merry Men 1/5 and two completed melodies.
+Synthetic
+checks cover GUID attribution, uint16 width, zero versus unknown, co-op
+merging, invalid counts, transient read outages and next-run clearing.
+History shows active earned/required notes and Completed for finished
+melodies. SQLite stores these fields in the existing per-run JSON payload;
+no schema migration or save recovery is needed.
+
+The integer signal structures at melody component `+0xB8` and `+0xD8`
+contain subscribers; their array lengths are not earned-note counts.
+Hero controller `+0x1398` and `+0x13A8` similarly hold navigable/UI viewers,
+not progress. Those are separate from the linked melody array at `+0x13B8`.
 
 ## Live readout
 

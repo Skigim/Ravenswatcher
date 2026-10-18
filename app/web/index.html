@@ -20,7 +20,7 @@
 <link rel="icon" href="asset://icons/icon_level.png">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="view-history">
 <div class="shell">
 
   <header class="head">
@@ -34,8 +34,8 @@
            live readout keeps painting underneath, so switching back shows the
            current frame rather than waiting for the next. -->
       <div class="tabs" role="tablist" aria-label="View">
-        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="live-view">Live</button>
-        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history">History</button>
+        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="false" aria-controls="live-view">Live</button>
+        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="true" aria-controls="history">History</button>
       </div>
       <div class="head-right" id="head-right"></div>
       <!-- Same box as the gear, but a link: it leaves the window for the
@@ -120,6 +120,13 @@
 
   <!-- Past runs, newest first. Each card expands in place to the summary. -->
   <section class="history" id="history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="history-toolbar" id="history-toolbar">
+      <button class="history-action" id="history-select" type="button">Select runs</button>
+      <label class="history-select-all" id="history-select-all-label" hidden><input id="history-select-all" type="checkbox"> Select all</label>
+      <button class="history-action history-danger" id="history-delete-selected" type="button" hidden>Delete selected</button>
+      <button class="history-action" id="history-selection-cancel" type="button" hidden>Cancel selection</button>
+      <button class="history-action history-danger history-delete-all" id="history-delete-all" type="button">Delete all history</button>
+    </div>
     <div class="history-list" id="history-list"></div>
   </section>
 
@@ -137,7 +144,10 @@
      the element under the pointer and positions it; see "tooltip" in
      styles.css for why it sits out here. -->
 <div class="tip" id="tip" role="tooltip" hidden>
-  <div class="tip-name" id="tip-name"></div>
+  <div class="tip-head">
+    <div class="tip-icon" id="tip-icon" aria-hidden="true" hidden></div>
+    <div><div class="tip-name" id="tip-name"></div><div class="tip-meta" id="tip-meta" hidden></div></div>
+  </div>
   <div class="tip-body" id="tip-body"></div>
 </div>
 
@@ -150,6 +160,15 @@
       <div class="settings-note">Rules between the boxes</div>
     </div>
     <button class="switch" id="panel-lines" type="button" role="switch" aria-checked="true">
+      <span class="switch-on">On</span><span class="switch-off">Off</span>
+    </button>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Stylized fonts</div>
+      <div class="settings-note">Germania One and Alegreya Sans</div>
+    </div>
+    <button class="switch" id="stylized-fonts" type="button" role="switch" aria-label="Stylized fonts" aria-checked="true">
       <span class="switch-on">On</span><span class="switch-off">Off</span>
     </button>
   </div>
@@ -205,6 +224,23 @@
   </div>
 </aside>
 
+<dialog class="history-delete-dialog" id="history-delete-dialog" aria-labelledby="history-delete-title" aria-describedby="history-delete-description">
+  <div class="kicker" id="history-delete-step"></div>
+  <h2 id="history-delete-title">Delete history</h2>
+  <p id="history-delete-description"></p>
+  <ul class="history-delete-review" id="history-delete-review"></ul>
+  <label class="history-delete-phrase" id="history-delete-phrase" hidden>
+    <span id="history-delete-prompt"></span>
+    <input id="history-delete-input" type="text" autocomplete="off" spellcheck="false">
+  </label>
+  <p class="history-delete-error" id="history-delete-error" role="alert"></p>
+  <div class="history-delete-actions">
+    <button class="history-action" id="history-delete-cancel" type="button">Cancel</button>
+    <button class="history-action history-danger" id="history-delete-confirm" type="button">Continue</button>
+  </div>
+</dialog>
+
+<script src="run-presentation.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -2,8 +2,26 @@
 
 ## Unreleased
 
+* Share Run copies a complete build image to the clipboard, including hero, score, melodies, talents, object stacks and damage.
+* The final stage is displayed as Epilogue across Live, History and shared images.
+* Stylized headings compose Kintarō’s macron using Germania One’s own glyphs.
+* Individual run deletion is available through History selection.
+
+* History shows earned/required notes for active melodies and marks completed melodies as Completed.
+* Talent hovers include their icon, rarity and recorded game-formatted effect, preserving percentages and damage values.
 * Melodies update again when you start or complete one, after the game update.
-* New History tab: every run you finish is saved with its result, hero, difficulty, score, talents and full end-of-run statistics. Click a run to see the details.
+* Finished runs are saved in History with their result, hero, difficulty, score, talents and end-of-run statistics.
+* Run cards show hero portraits, difficulty icons and ten talent slots, with details on hover.
+* Expanded runs have tabs for Hero Details, Score Details, Melodies and Magical Objects, Damage Dealt, Support, Sufferings and Resources.
+* Magical objects show their icons, rarity and stack counts; recorded melodies keep their portraits and final progress state.
+* Hero attributes use game icons with hover labels, and damage is broken down by ability with percentage bars.
+* The app opens on History and switches to Live when a run starts.
+* Settings can switch between stylized Germania One and Alegreya Sans fonts or the standard font, with the choice saved between launches.
+* Score details use activity icons, including Wishing Well and Stingy Jack, with each saved score line available on hover.
+* Combat and Cursed rooms have distinct icons in the map panel; Gold and Mirror rooms retain their harp and mirror icons.
+* Connection status is a small dot with details on hover.
+* Delete individual runs, selected runs, or the entire history, with two confirmations for one run and three for bulk or delete-all.
+* Scrollbars now match the app's dark theme.
 
 ## 0.1.5 — 2026-10-12
 

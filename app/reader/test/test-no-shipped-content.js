@@ -31,6 +31,9 @@ function main() {
     assert.strictEqual(pngs.length, 0, `PNG in stage: ${pngs.join(', ')}`);
     assert.ok(!web.includes('web/item-text.js') && !web.includes('web/item-icons.js'), 'generated tables in stage');
     assert.ok(web.includes('web/assets/SOURCES.tsv'), 'manifest missing from stage');
+    for (const name of ['GermaniaOne-Regular.ttf', 'GermaniaOne-OFL.txt', 'AlegreyaSans-Regular.ttf', 'AlegreyaSans-Bold.ttf', 'AlegreyaSans-OFL.txt']) {
+      assert.ok(web.includes('web/assets/fonts/' + name), 'offline font or license missing: ' + name);
+    }
     assert.ok(fs.existsSync(path.join(stage, 'assets', 'build.js')), 'assets/build.js missing from stage');
     assert.ok(fs.existsSync(path.join(stage, 'assets', 'build-worker.js')), 'assets/build-worker.js missing from stage');
     assert.ok(fs.existsSync(path.join(stage, 'THIRD_PARTY_NOTICES.md')), 'notices missing from stage');
@@ -38,6 +41,7 @@ function main() {
       fs.readFileSync(path.join(__dirname, '..', '..', '..', 'LICENSE'), 'utf8'), 'MIT license missing from stage');
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(stage, 'value_types.json'), 'utf8')),
       JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'value_types.json'), 'utf8')), 'bundled type metadata differs');
+    for (const file of ['share.js','web/share.html','web/share.js','web/share.css','web/typography.css','web/run-presentation.js']) assert.ok(fs.existsSync(path.join(stage,file)), 'share runtime missing: '+file);
     assert.ok(fs.existsSync(path.join(stage, 'update.js')), 'update.js missing from stage');
   } finally {
     fs.rmSync(stage, { recursive: true, force: true });

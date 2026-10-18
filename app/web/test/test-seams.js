@@ -87,12 +87,16 @@ async function main() {
     width: 1280, height: 800, show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
+  // Avoid the native Windows menu arriving after the first layout snapshot.
+  win.setMenu(null);
   const js = (src) => win.webContents.executeJavaScript(src);
 
   await win.loadURL(pathToFileURL(INDEX).href);
   // A known starting point regardless of what a previous run stored.
   await js(`localStorage.removeItem('ravenswatch:panel-lines'); localStorage.removeItem('ravenswatch:diagnostics'); location.reload();`);
   await new Promise(r => win.webContents.once('did-finish-load', r));
+
+  await js(`setView('live'); document.fonts.ready.then(() => true)`);
 
   console.log('\ntest-seams: the panel-lines toggle');
 
@@ -149,6 +153,7 @@ async function main() {
 
   await win.webContents.reload();
   await new Promise(r => win.webContents.once('did-finish-load', r));
+  await js(`setView('live'); document.fonts.ready.then(() => true)`);
   check('and is applied again on the next load',
     (await js(`document.body.classList.contains('seamless')`)) === true);
   check('the switch comes back showing off, not its markup default',
@@ -248,14 +253,19 @@ async function main() {
       const body = getComputedStyle(document.querySelector('.body')).display;
       return kpis === 'none' && seam === 'none' && body === 'none';
     })()`)) === true);
-  check('status pill remains healthy live state during between-runs',
+  check('connection dot stays connected during between-runs',
     (await js(`(() => {
       const pill = document.querySelector('#head-right .status');
-      return pill && pill.classList.contains('status-live') && pill.textContent.trim() === 'live';
+      return pill && pill.classList.contains('status-live') && pill.textContent.trim() === '' && pill.dataset.tipName === 'Connected to Ravenswatch';
     })()`)) === true);
+  check('connection indicator is compact and accessible', await js(`(() => { const n=document.querySelector('#head-right .status'); return n.getBoundingClientRect().width <= 28 && n.tabIndex === 0 && n.getAttribute('aria-label') === 'Connected to Ravenswatch'; })()`));
+  await js(`document.querySelector('#head-right .status').dispatchEvent(new FocusEvent('focusin', {bubbles:true}))`);
+  check('connection details appear on focus', await js(`!document.getElementById('tip').hidden && document.getElementById('tip-name').textContent === 'Connected to Ravenswatch'`));
   check('footer diagnostics remain active during between-runs',
     (await js(`document.getElementById('diag').textContent.includes('Ravenswatch.exe')`)) === true);
 
+  await js(`markStale()`);
+  check('stale connection changes its hover details', await js(`document.querySelector('#head-right .status').dataset.connection === 'stale' && document.querySelector('#head-right .status').dataset.tipName.includes('not responding')`));
   // Transition back to a live run
   const liveRunFrame = {
     level: 3,

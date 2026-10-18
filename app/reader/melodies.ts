@@ -92,6 +92,8 @@ export interface MelodySlotView {
   readonly name: string;
   readonly icon: string;
   readonly notes: number;
+  /** Earned notes for the active melody; null means unreadable/not applicable. */
+  readonly notes_earned: number | null;
   readonly state: LifecycleName | null;
   readonly effect: string;
 }
@@ -526,6 +528,70 @@ export function attributeStates(
   return slotObserved.map(seen => (seen.length ? Math.max(...seen) : 0)) as [number, number, number];
 }
 
+export interface MelodyProgress { readonly earned: number | null; readonly required: number }
+
+/** The same uint16 event counter read by the game's melody completion handler. */
+export function readHeroNoteCount(proc: MelodySource, hero: number): number | null {
+  const data = proc.readPtr(hero + 0x1da8);
+  if (!data) return null;
+  const header = proc.read(data + 0x48, 16);
+  if (!header || header.length !== 16) return null;
+  const count = header.readUInt32LE(8), capacity = header.readUInt32LE(12);
+  if (count > 256 || capacity < count || capacity > 65536) return null;
+  if (count === 0) return 0;
+  const entries = proc.readPtr(data + 0x48);
+  if (!entries) return null;
+  const bytes = proc.read(entries, count * 24);
+  if (!bytes || bytes.length !== count * 24) return null;
+  let result: number | null = null;
+  for (let i = 0; i < count; i++) {
+    if (bytes.readUInt32LE(i * 24 + 8) !== 0xc978d974) continue;
+    if (result !== null) return null; // ambiguous progress context
+    result = bytes.readUInt16LE(i * 24 + 12);
+  }
+  return result ?? 0;
+}
+
+/** Progress is shared by a hero's current melody, never all three pool slots. */
+export function readProgress(
+  proc: MelodySource, vtables: MelodyVtables | null, pool: MelodyPool,
+  states: readonly number[] | null, registry: MelodyRegistry | null,
+  heroes: readonly number[],
+): (MelodyProgress | null)[] {
+  const found: MelodyProgress[][] = [[], [], []];
+  if (!vtables?.heroControllerVt || !vtables.melodyCpntVt || !states || !registry) return found.map(() => null);
+  for (const hero of heroes) {
+    if (proc.readPtr(hero) !== vtables.heroControllerVt || !isLiveHero(proc, hero)) continue;
+    const array = proc.readPtr(hero + HERO_LINKED_MELODIES_OFFSET);
+    const n = proc.readI32(hero + HERO_LINKED_COUNT_OFFSET);
+    if (!array || n === null || n < 1 || n > 16) continue;
+    const active: { slot: number; required: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const cpnt = proc.readPtr(array + i * 8);
+      if (!cpnt || proc.readPtr(cpnt) !== vtables.melodyCpntVt || proc.readI32(cpnt + 0x68) !== 1) continue;
+      const entity = proc.readPtr(cpnt + 8), object = entity ? proc.readPtr(entity + 0x28) : null;
+      const guid = object ? proc.read(object + 0x1c8, 16) : null;
+      const def: MelodyDefinition | null | undefined = guid ? registry.get(guidToHex(guid)) : null;
+      const slot = def ? pool.findIndex(p => p.internal_name === def.internal_name) : -1;
+      if (slot < 0 || states[slot] !== 1) continue;
+      const definition = proc.readPtr(cpnt + 0x168);
+      const required = definition ? proc.readI32(definition + 0x320) : null;
+      if (required !== null && required > 0 && required <= 65535) active.push({ slot, required });
+    }
+    // Never attach one shared counter to multiple active melodies on one hero.
+    const only = active.length === 1 ? active[0] : undefined;
+    if (!only) continue;
+    const earned = readHeroNoteCount(proc, hero);
+    found[only.slot]?.push({ required: only.required, earned: earned !== null && earned <= only.required ? earned : null });
+  }
+  return found.map(rows => {
+    const first = rows[0];
+    if (!first || new Set(rows.map(r => r.required)).size !== 1) return null;
+    const known = rows.flatMap(r => r.earned === null ? [] : [r.earned]);
+    return { required: first.required, earned: known.length ? Math.max(...known) : null };
+  });
+}
+
 /**
  * Combine pool and lifecycle states into the final output contract.
  * Unresolved states remain null and must render as unresolved.
@@ -533,6 +599,7 @@ export function attributeStates(
 export function combineMelodies(
   pool: MelodyPool | null,
   states: readonly number[] | null,
+  progress: readonly (MelodyProgress | null)[] | null = null,
 ): MelodySlotView[] | null {
   if (!pool || !Array.isArray(pool) || pool.length !== 3) return null;
 
@@ -545,7 +612,8 @@ export function combineMelodies(
       internal_name: def.internal_name,
       name: def.name,
       icon: def.icon,
-      notes: def.notes,
+      notes: progress?.[slot]?.required ?? def.notes,
+      notes_earned: stateStr === 'active' ? progress?.[slot]?.earned ?? null : null,
       state: stateStr,
       effect: def.effect,
     };

@@ -34,6 +34,11 @@ function main() {
     assert.strictEqual(t.ITEM_TEXT.grimoirevitality, '+Max Health');
     assert.strictEqual(t.ITEM_TEXT.madhat, 'Gain Crit Chance,\nlose -Armor (per hit)');
     assert.ok(!('devilpocket' in t.ITEM_TEXT));
+    assert.strictEqual(t.OBJECT_KEYS['00112233445566778899aabbccddeeff'], 'adamant', 'raw GUID order');
+    assert.strictEqual(t.OBJECT_RARITIES['00112233445566778899aabbccddeeff'], 'Legendary');
+    assert.strictEqual(t.OBJECT_KEYS['22'.repeat(16)], 'goldenegg', 'variant identity joins inherited art');
+    assert.strictEqual(t.OBJECT_KEYS['55'.repeat(16)], 'grimoirevitality');
+    assert.ok(!t.OBJECT_KEYS['99'.repeat(16)], 'unlisted definitions cannot leak into the GUID map');
 
     // Two live definitions under one name that disagree stop the build.
     const D = path.join(root, encodeName('EntitySettings'), encodeName('Objects'));
