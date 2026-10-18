@@ -1519,6 +1519,7 @@ function setView(next) {
 
 let shareBusy = false;
 const shareStatuses = new Map();
+
 function refreshShareButtons() {
   for (const button of document.querySelectorAll(".run-share")) {
     button.disabled = shareBusy || typeof window.ravenswatch?.shareRun !== "function";
@@ -1526,16 +1527,29 @@ function refreshShareButtons() {
     button.previousElementSibling.textContent = shareStatuses.get(Number(button.dataset.runId)) || "";
   }
 }
+
 let sharingRunId = null;
+
 async function shareRun(id) {
   if (shareBusy || typeof window.ravenswatch?.shareRun !== "function") return;
-  shareBusy = true; sharingRunId = id; shareStatuses.set(id, ""); refreshShareButtons();
+  shareBusy = true;
+  sharingRunId = id;
+  shareStatuses.set(id, "");
+  refreshShareButtons();
   try {
-    const result = await window.ravenswatch.shareRun({runId:id,stylizedFonts:document.body.classList.contains("stylized-fonts")});
+    const result = await window.ravenswatch.shareRun({
+      runId: id,
+      stylizedFonts: document.body.classList.contains("stylized-fonts"),
+    });
     if (!result.ok) throw new Error(result.error || "Could not copy this run.");
     shareStatuses.set(id, "Copied to clipboard");
-  } catch (error) { shareStatuses.set(id, error.message || "Could not copy this run."); }
-  finally { shareBusy = false; sharingRunId = null; refreshShareButtons(); }
+  } catch (error) {
+    shareStatuses.set(id, error.message || "Could not copy this run.");
+  } finally {
+    shareBusy = false;
+    sharingRunId = null;
+    refreshShareButtons();
+  }
 }
 
 function canDeleteHistory() {
@@ -1662,8 +1676,15 @@ function cancelHistoryDeletion() {
 }
 
 function initHistoryDeletion() {
-  el("history-select").addEventListener("click", () => { selectingHistory = true; renderHistory(); });
-  el("history-selection-cancel").addEventListener("click", () => { selectingHistory = false; selectedHistory.clear(); renderHistory(); });
+  el("history-select").addEventListener("click", () => {
+    selectingHistory = true;
+    renderHistory();
+  });
+  el("history-selection-cancel").addEventListener("click", () => {
+    selectingHistory = false;
+    selectedHistory.clear();
+    renderHistory();
+  });
   el("history-select-all").addEventListener("change", event => {
     selectedHistory.clear();
     if (event.target.checked) for (const run of historyRuns) selectedHistory.add(run.id);
@@ -1674,11 +1695,16 @@ function initHistoryDeletion() {
   el("history-delete-cancel").addEventListener("click", cancelHistoryDeletion);
   el("history-delete-confirm").addEventListener("click", confirmHistoryDeletion);
   el("history-delete-input").addEventListener("input", renderHistoryDeletion);
-  el("history-delete-dialog").addEventListener("cancel", event => { event.preventDefault(); cancelHistoryDeletion(); });
+  el("history-delete-dialog").addEventListener("cancel", event => {
+    event.preventDefault();
+    cancelHistoryDeletion();
+  });
   el("history-delete-dialog").addEventListener("click", event => {
     if (event.target !== event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) cancelHistoryDeletion();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+      cancelHistoryDeletion();
+    }
   });
 }
 

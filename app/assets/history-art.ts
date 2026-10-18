@@ -25,9 +25,14 @@ function components(blob: Buffer): { start: number; end: number; name: string }[
 }
 
 export function buildHistoryArt(cookingDir: string): {
-  tables: HistoryArtTables; rows: { asset: string; uiPath: string }[];
+  tables: HistoryArtTables;
+  rows: { asset: string; uiPath: string }[];
 } {
-  const tables: HistoryArtTables = { HERO_ICONS: {}, DIFFICULTY_ICONS: {}, TALENT_ICONS: {} };
+  const tables: HistoryArtTables = {
+    HERO_ICONS: {},
+    DIFFICULTY_ICONS: {},
+    TALENT_ICONS: {},
+  };
   const assets = new Map<string, string>();
   const heroOwners = new Map<string, string>();
   const add = (uiPath: string): string => {
@@ -35,7 +40,9 @@ export function buildHistoryArt(cookingDir: string): {
     assets.set(uiPath, asset);
     return asset;
   };
-  const files = (dir: string): string[] => fs.existsSync(cookedPath(cookingDir, dir)) ? listCooked(cookingDir, dir) : [];
+  const files = (dir: string): string[] =>
+    fs.existsSync(cookedPath(cookingDir, dir)) ? listCooked(cookingDir, dir) : [];
+
   for (const file of files('Definitions/Heroes')) {
     if (!file.endsWith('.herodef.ot.DtHeroDefinition.gen')) continue;
     const hero = file.split('.')[0]?.replace(/_Update\d+$/i, '');
@@ -45,9 +52,12 @@ export function buildHistoryArt(cookingDir: string): {
     const owner = /Heroes\\(Hero_[A-Za-z0-9_]+)\\/.exec(blob)?.[1];
     if (owner) heroOwners.set(owner, hero);
     const portraits = [...new Set(blob.match(/Heroes\\[A-Za-z0-9_]+\\Portrait_[A-Za-z0-9_]+\.png/g) ?? [])]
-      .filter(p => !/_Highlight\.png$/.test(p));
-    if (portraits.length === 1 && portraits[0]) tables.HERO_ICONS[hero] = add(portraits[0].replace(/\\/g, '/'));
+      .filter((p) => !/_Highlight\.png$/.test(p));
+    if (portraits.length === 1 && portraits[0]) {
+      tables.HERO_ICONS[hero] = add(portraits[0].replace(/\\/g, '/'));
+    }
   }
+
   for (const file of files('EntitySettings/Heroes')) {
     const match = /^(Hero_[^!]+)!\1\.entity\.ot\.EntitySettingsResource\.gen$/.exec(file);
     if (!match?.[1]) continue;
@@ -58,21 +68,30 @@ export function buildHistoryArt(cookingDir: string): {
     records.forEach((record, i) => {
       if (!record.name.startsWith('Skill Controller ')) return;
       const end = records[i + 1]?.start ?? blob.length;
-      const paths = [...new Set(blob.toString('latin1', record.end, end)
-        .match(/Heroes\\[A-Za-z0-9_\\ .!-]+\.png/g) ?? [])].filter(p => !/_Disabled\.png$/.test(p));
+      const paths = [
+        ...new Set(blob.toString('latin1', record.end, end).match(/Heroes\\[A-Za-z0-9_\\ .!-]+\.png/g) ?? []),
+      ].filter((p) => !/_Disabled\.png$/.test(p));
       if (paths.length === 1 && paths[0]) {
         const asset = add(paths[0].replace(/\\/g, '/'));
-        if (icons[record.name] && icons[record.name] !== asset) throw new Error(`${hero}: ambiguous art for ${record.name}`);
+        if (icons[record.name] && icons[record.name] !== asset) {
+          throw new Error(`${hero}: ambiguous art for ${record.name}`);
+        }
         icons[record.name] = asset;
       }
     });
     tables.TALENT_ICONS[hero] = icons;
   }
+
   for (let d = 0; d <= 3; d++) {
     const uiPath = `Common/Difficulty Icons/Icon_NewDifficulty_${d}.png`;
     if (fs.existsSync(cookedPath(cookingDir, `Ui/Common/Difficulty Icons!Icon_NewDifficulty_${d}.png.Texture.dxt`))) {
       tables.DIFFICULTY_ICONS[d] = add(uiPath);
     }
   }
-  return { tables, rows: [...assets].map(([uiPath, asset]) => ({ asset, uiPath })) };
+
+  return {
+    tables,
+    rows: [...assets].map(([uiPath, asset]) => ({ asset, uiPath })),
+  };
 }
+
