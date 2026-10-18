@@ -1,6 +1,6 @@
 {
   "name": "ravenswatch-live-readout",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Electron shell hosting the live Ravenswatcher readout page, with the memory reader running on Electron's own Node runtime.",
   "main": "main.js",
