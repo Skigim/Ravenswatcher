@@ -270,8 +270,14 @@ const sidecar = createSidecar({
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
+    // Sizes are the page's, not the frame's: 1280x800 is the design
+    // artboard, and the minimum matches the .shell min-width/min-height in
+    // web/styles.css, below which the page clips instead of scrolling.
+    useContentSize: true,
     width: 1280,
     height: 800,
+    minWidth: 960,
+    minHeight: 620,
     // A single readout window with no documents and nothing editable: the
     // stock File/Edit/View/Window menu does nothing here. autoHideMenuBar
     // rather than Menu.setApplicationMenu(null), because the default menu is
