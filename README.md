@@ -77,8 +77,10 @@ The app needs your own installed copy of Ravenswatch to display live data.
 It decodes icons and item descriptions from that install at runtime.
 
 The source is in `app/`: `reader/` reads game memory, `assets/` decodes local
-resources, and `web/` renders the readout. See [CONTRIBUTING.md](CONTRIBUTING.md)
-and the [reader README](app/reader/README.md).
+resources, and `web/` renders the readout. See the
+[development guide](docs/development.md),
+[architecture reference](docs/architecture.md), and
+[contributing guide](CONTRIBUTING.md).
 
 ## License
 

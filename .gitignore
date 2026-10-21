@@ -1,5 +1,8 @@
 /app/node_modules/
 /build/
+# Local planning notes are not project documentation.
+/plans/
+/release/PLAN-*.md
 /app/build/icon.ico
 /app/build/icon-local.ico
 /app/dist/

@@ -1,22 +1,64 @@
-# The memory reader, in Node
+# Ravenswatcher architecture
 
-This is the reader the Electron app runs, and the only one. It replaced a
-PyInstaller-frozen Python sidecar: Electron already ships a Node runtime, so
-the ~49 MB second interpreter had no reason to be in the bundle, and freezing
-it was half the build.
+This reference describes the current implementation. Build and diagnostic
+commands live in [development.md](development.md); release plans are local
+notes in the gitignored `plans/` directory.
 
-## What it produces
+## Application boundaries
+
+The Electron main process owns the window, IPC, asset protocol, run-history
+persistence, and reader supervision. The page receives data through the preload
+bridge with context isolation enabled and Node integration disabled.
+
+The shell runs `app/reader/stdio.js` using Electron's own Node runtime with
+`ELECTRON_RUN_AS_NODE=1`. The sidecar sends JSON frames over stdout; nothing
+listens on a port. There is no separate Python interpreter in the application.
+
+Paths below are relative to `app/`:
+
+```text
+main.js              Electron lifecycle, IPC, asset:// protocol
+lifecycle.js         cooperative shutdown and relaunch coordination
+sidecar.js           reader supervision and JSON frame transport
+preload.js           isolated renderer subscriptions and requests
+history.ts           SQLite run persistence and deletion confirmations
+share.ts             saved-run image generation and clipboard sharing
+update.js            once-per-launch GitHub release check
+reader/              read-only Windows process reader and workers
+assets/              runtime resource decoders
+web/                 HTML/CSS/JavaScript renderer
+scripts/             reproducible icon and distribution staging
+value_types.json     bundled type metadata
+```
+
+The reader requests only `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`.
+It does not write memory, inject code, or request elevation. The update
+check offers a link; it never downloads or installs automatically.
+
+Linux currently uses the Windows build inside the game's Proton session,
+as described in the [player instructions](../README.md#linux). The reader
+and its workers use Win32 bindings; a native Linux backend is not implemented.
+
+## Runtime data
+
+Finished runs are saved in `run-history.sqlite` under Electron's user-data
+directory. Each stored summary retains its raw values; game resources remain
+in a separate cache and are resolved when History renders.
+
+Game art and the full item-description table are not included. On attach,
+the app decodes the resources it needs from the installed game into
+`game-assets/` under Electron's user-data directory. Until then, the page
+can display names without art or descriptions. `app/web/assets/SOURCES.tsv`
+maps cache filenames to game resource paths. The bundled Archivo font
+retains its SIL Open Font License.
+
+## Reader output
 
 A fixed-size JSON object, one line per poll on stdout — the contract
 `app/sidecar.js` parses. `test-stdio` asserts the key count, so a field
 added to `readState` without updating that assertion fails the suite.
 
-Raw *lines* differ even when the objects match — Python's `json.dumps`
-emits `", "` separators and `\uXXXX` escapes, `JSON.stringify` emits
-neither. Anything comparing bytes rather than parsed objects needs to know
-that.
-
-## Layout
+## Reader layout
 
 The tree is a file-by-file TypeScript port. A `.ts` file compiles in place
 to a gitignored `.js` beside it; edit the `.ts`. Files listed as `.js` are
@@ -33,10 +75,10 @@ rtti.js        TypeDescriptor -> Complete Object Locator -> vtable, and the
                inverse (vtable -> class name)
 scan.js        the sweep primitive: every 8-byte-aligned occurrence of a
                target set, one pass for all targets
-values.ts      discover_values.py: name index, binding join, both union
+values.ts      name index, binding join, both union
                variants, .gen/JSON type map
 struct_offsets.json
-               the struct layout values.ts and discover_values.py share
+               measured struct layout constants used by values.ts
 placement.js   which entities the map generator actually placed
 melodies.ts    4th channel: 3-melody pool resolution and per-slot lifecycle
 sandman.ts     the shop channel: six offers, prices and sold state, read off
@@ -57,38 +99,8 @@ reader.js      attach + poll + asynchronous cooperative close
 stdio.js       one JSON object per line on stdout
 ```
 
-```
-node test/run-all.js           reader suites and Electron renderer suites;
-                               spawns synthetic target processes
-node bench/scan-bench.js       pattern-scan throughput on synthesised buffers
-node bench/rpm-bench.js        end-to-end sweep against a spawned ~2 GB process
-node bench/placement-bench.js  end-to-end placement sweep against a live process
-node bench/placement-profile.js  the same sweep, split into its stages and timed
-node bench/melody-bench.js     end-to-end melody registry, pool, and state diagnostics
-node bench/launch-watch.js     waits for the game to start, then records the
-                               whole frame plus sweep internals from before
-                               the process exists, through both menus and a
-                               load, into a run -- one JSONL object per change
-node bench/launch-watch.js --diagnostics
-                               adds worker messages, raw bindings/rosters and
-                               an attachment-time RTTI/static-anchor check;
-                               writes a fresh build/compatibility-*.jsonl
-                               at the repo root. Start before launching the
-                               game; stop with Ctrl+C. Does not decode assets.
-node bench/transition-watch.js watches map id, melodies and hero level across a
-                               map or run boundary
-node bench/melody-transition-watch.js  the melody channel alone, 250 ms, with no
-                               scan while the payload is up -- times an outage
-                               without the classification scans inflating it
-node bench/run-start-watch.js  map id against Hero Level as a run starts, plus
-                               the scene context address each run lands on
-node bench/spell-control.js    tells a real marker path from a misspelled one
-                               with no run loaded -- ABSENT means misspelled
-node bench/verify-map.js       runs the marker check for the current map
-```
-
-`test/`, `bench/` and this file are excluded from `build.files` and do not
-ship.
+Distribution staging excludes tests, benchmarks, and documentation. See the
+[development guide](development.md#building-the-portable-zip) for packaging.
 
 ## Constraints that bite a future edit
 
@@ -128,11 +140,11 @@ workers in the middle of native calls.
 
 ## Reader inputs
 
-`struct_offsets.json` holds the measured layout constants. It is loaded
-relative to this module and validated as hex strings, so an omitted key or
+`app/reader/struct_offsets.json` holds the measured layout constants. It is loaded
+relative to the reader module and validated as hex strings, so an omitted key or
 a JSON number where a hex string is required produces a startup error.
 
-`../value_types.json` supplies the default name-to-type map in source and
+`app/value_types.json` supplies the default name-to-type map in source and
 packaged layouts. It is metadata, not a census of live values. Names absent
 from it still resolve but have no declared type.
 
@@ -147,12 +159,12 @@ synthetic tests exercise parsing, malformed records, and partial-tree merge.
 The regression tests cover these reader-specific constraints:
 
 - **Map ids start at 0.** Nothing hardcodes an id; `sweeper.js` reads the
-  `"<Map name> map id"` constants out of the index the way
-  `discovery_worker` does. Every test in `state.js` is `!== null`, never
+  `"<Map name> map id"` constants out of the index. Every test in
+  `state.ts` is `!== null`, never
   truthiness, so Dark Hills' `0` is never mistaken for absent. Covered by
   `test-chain`'s map-table assertion.
 - **A zero is a real reading, distinct from unresolved.** `null` is
-  unresolved, `0` is a value, and every test in `state.js` is `!== null`
+  unresolved, `0` is a value, and every test in `state.ts` is `!== null`
   rather than truthy. Covered by `test-chain` and by the `storm` fixture's
   envelope parity.
 - **The values index is held, and rebuilt on four signals.** `sweeper.js`
@@ -179,5 +191,3 @@ The regression tests cover these reader-specific constraints:
 - **The only argument is an optional PID.** `stdio.js` rejects anything that
   does not parse as one, rather than handing `NaN` to `OpenProcess`, which
   reports `GetLastError=87` instead of the game-not-running message.
-- **`handle` is reserved on a request handler.** Not applicable — no HTTP
-  front end is ported.

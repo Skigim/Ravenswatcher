@@ -29,7 +29,7 @@
 // It attaches with the shipped Reader rather than a bespoke read path, so
 // what lands in the file is what the app itself sees. Cost is low: the
 // expensive placement sweep does not run while map id reads -1 (see
-// reader/README.md), so the menu and the load stages add nothing, and a
+// docs/architecture.md), so the menu and the load stages add nothing, and a
 // settled run performs none either. The region walk below is VirtualQuery
 // only -- no reads -- and is sampled every couple of seconds rather than
 // every poll.
