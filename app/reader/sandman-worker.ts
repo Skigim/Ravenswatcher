@@ -28,6 +28,7 @@ import * as sandman from './sandman';
 import type { SandmanOffer, SandmanStatus, SandmanSource, ResolvedVtables } from './sandman';
 import { pollBinding } from './values';
 import { WorkerControl } from './worker-control';
+import type { SandmanWorkerInbound, SandmanWorkerOutbound } from './worker-messages';
 
 // win32.js is still JavaScript; require it directly.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -48,15 +49,12 @@ interface WorkerProcess extends SandmanSource {
   close(): void;
 }
 
-/** What Reader posts to this worker. */
-type SandmanWorkerMessage =
-  | { type: 'gate'; addr: number | null; variant: string | null; is_float: boolean }
-  | { type: 'clear' };
+function post(m: SandmanWorkerOutbound): void {
+  if (parentPort) parentPort.postMessage(m);
+}
 
 function fail(message: string): void {
-  if (parentPort) {
-    parentPort.postMessage({ type: 'fatal', message });
-  }
+  post({ type: 'fatal', message });
 }
 
 export function pollGate(proc: SandmanSource, gate: GateBinding | null): boolean {
@@ -92,7 +90,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   let lastVtableAttempt = 0;
 
   if (parentPort) {
-    parentPort.on('message', (m: SandmanWorkerMessage) => {
+    parentPort.on('message', (m: SandmanWorkerInbound) => {
       if (m.type === 'gate') {
         gate = m.addr ? { addr: m.addr, variant: m.variant, is_float: m.is_float } : null;
       } else if (m.type === 'clear') {
@@ -108,7 +106,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   try {
     while (!control.stopped) {
       if (!proc.isAlive()) {
-        if (parentPort) parentPort.postMessage({ type: 'gone', message: 'target process exited' });
+        post({ type: 'gone', message: 'target process exited' });
         break;
       }
 
@@ -124,8 +122,8 @@ export async function runWorker(pid: number, base: number): Promise<void> {
           } catch {
             resolvedVtables = null;
           }
-          if (!resolvedVtables && parentPort) {
-            parentPort.postMessage({
+          if (!resolvedVtables) {
+            post({
               type: 'diagnostic',
               message: 'could not resolve Sandman RTTI vtables -- '
                 + 'CONTROLLER_RTTI or MAGICAL_OBJECT_RTTI is stale; '
@@ -179,12 +177,10 @@ export async function runWorker(pid: number, base: number): Promise<void> {
       try {
         offersRead = sandman.readOffers(proc, resolvedVtables, cachedController);
       } catch (e) {
-        if (parentPort) {
-          parentPort.postMessage({
-            type: 'diagnostic',
-            message: 'Sandman offer read threw: ' + (e instanceof Error ? e.message : String(e)),
-          });
-        }
+        post({
+          type: 'diagnostic',
+          message: 'Sandman offer read threw: ' + (e instanceof Error ? e.message : String(e)),
+        });
         offersRead = null;
       }
 
@@ -218,9 +214,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
       if (sandman.offersChanged(lastPostedOffers, heldOffers) || status !== lastPostedStatus) {
         lastPostedOffers = heldOffers;
         lastPostedStatus = status;
-        if (parentPort) {
-          parentPort.postMessage({ type: 'sandman', offers: heldOffers, status });
-        }
+        post({ type: 'sandman', offers: heldOffers, status });
       }
 
       await control.wait(SANDMAN_POLL_MS);

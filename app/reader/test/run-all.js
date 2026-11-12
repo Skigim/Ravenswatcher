@@ -38,6 +38,7 @@ const SUITES = [
   ['test-update', () => require('./test-update').main()],
   ['test-runs', () => require('./test-runs').main()],
   ['test-history', () => require('./test-history').main()],
+  ['test-history-record', () => require('./test-history-record').main()],
   ['test-history-deletion', () => require('./test-history-deletion').main()],
 ];
 

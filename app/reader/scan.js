@@ -6,7 +6,7 @@
 //
 //   1. Writable regions only. Heap objects live nowhere else, and image-backed
 //      pages fault in from disk.
-//   2. One reusable scratch Buffer (see win32.js scratch). ReadProcessMemory
+//   2. One reusable scratch Buffer (see scratch.ts). ReadProcessMemory
 //      writes straight into the memory the scan loop reads; nothing is copied
 //      or reallocated per region.
 //   3. Aligned qword comparison, not a byte search. The buffer is walked as a
@@ -18,7 +18,7 @@
 // No BigInt anywhere in the loop -- BigUint64Array compares measured ~4x
 // slower than the split-word Uint32Array form.
 
-const { scratch } = require('./win32');
+const { scratch } = require('./scratch');
 
 const CHUNK_SIZE = 64 * 1024 * 1024;
 // Granularity of the re-read after a chunk read fails. 64 KB is the

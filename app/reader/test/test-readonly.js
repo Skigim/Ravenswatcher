@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const koffi = require('koffi');
 const win32 = require('../win32');
+const { scratch } = require('../scratch');
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -75,9 +76,9 @@ function main() {
     ['void *', 'size_t', 'void *', 'size_t', koffi.out(koffi.pointer('size_t'))]);
   const GetLastError = k32.func('__stdcall', 'GetLastError', 'uint32', []);
 
-  const victim = win32.scratch(64);
+  const victim = scratch(64);
   victim.dv.setUint32(0, 0x11223344, true);
-  const payload = win32.scratch(4);
+  const payload = scratch(4);
   payload.dv.setUint32(0, 0xdeadbeef, true);
 
   const proc = win32.openProcess(process.pid);

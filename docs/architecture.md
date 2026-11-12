@@ -22,9 +22,13 @@ lifecycle.js         cooperative shutdown and relaunch coordination
 sidecar.js           reader supervision and JSON frame transport
 preload.js           isolated renderer subscriptions and requests
 history.ts           SQLite run persistence and deletion confirmations
+history-record.ts    validates one stored row for analytics (nulls stay null)
+sidecar-frame.ts     sidecar stdout frame types and runtime guard
+preload-api.ts       typed shape of window.ravenswatch (types only)
 share.ts             saved-run image generation and clipboard sharing
 update.js            once-per-launch GitHub release check
 reader/              read-only Windows process reader and workers
+  worker-messages.ts  typed parent/worker message unions (types only)
 assets/              runtime resource decoders
 web/                 HTML/CSS/JavaScript renderer
 scripts/             reproducible icon and distribution staging
@@ -68,6 +72,10 @@ tracked JavaScript.
 win32.js       koffi bindings. Read-only by construction: no write or inject
                primitive is bound, and openProcess() takes no access-mask
                argument a caller could widen.
+scratch.ts     reusable Buffer-backed scratch memory for native reads, shared by
+               win32.js and scan.js
+process.ts     platform-neutral process backend types (discovery, module
+               identity, regions, reads, liveness, close); not wired in yet
 pe.ts          PE section headers out of a mapped image
 pefile.js      a .read() source backed by a PE file on disk, so the RTTI walk
                can be exercised without attaching to anything
