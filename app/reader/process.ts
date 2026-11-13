@@ -92,9 +92,10 @@ export interface ProcessHandle {
  * Discovery failures are tagged on Error.code. 'ENOGAME' (no candidate) is
  * the one stdio.js branches on: it exits with a distinct status so the
  * supervisor retries at a steady cadence. The several-candidates failure is
- * deliberately untagged, as in win32.js: it needs a human.
+ * deliberately untagged, as in win32.js: it needs a human. 'EUNSUPPORTED'
+ * is thrown by getProcessBackend (backend.ts) for a platform with no backend.
  */
-export type ProcessErrorCode = 'ENOGAME';
+export type ProcessErrorCode = 'ENOGAME' | 'EUNSUPPORTED';
 
 /** The backend: one implementation per platform. */
 export interface ProcessBackend {

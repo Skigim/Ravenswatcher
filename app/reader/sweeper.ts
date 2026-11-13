@@ -1,4 +1,3 @@
-'use strict';
 // The discovery sweep, on a worker thread.
 //
 // A worker and not an async function: the scan is plain synchronous JS, so a
@@ -11,20 +10,27 @@
 // It posts back addresses, never values. Polling those addresses stays on the
 // main thread so a frame is never one sweep-interval stale.
 
-const { parentPort, workerData, isMainThread } = require('worker_threads');
-const { openProcess } = require('./win32');
-const { WorkerControl } = require('./worker-control');
-const rtti = require('./rtti');
-const values = require('./values');
-const placement = require('./placement');
-const melodies = require('./melodies');
-const { TRACKED_NAMES, CURRENT_MAP_ID, MAP_ID_SUFFIX, SWEEP_INTERVAL,
+import { parentPort, workerData, isMainThread } from 'worker_threads';
+import type { MessagePort } from 'worker_threads';
+import { getProcessBackend } from './backend';
+import { WorkerControl } from './worker-control';
+import * as rtti from './rtti';
+import * as values from './values';
+import type { Resolution, ValueIndex } from './values';
+import * as placement from './placement';
+import type { PlacementCache } from './placement';
+import * as melodies from './melodies';
+import type { MelodySlotView, MelodyVtables, MelodyRegistry } from './melodies';
+import { TRACKED_NAMES, CURRENT_MAP_ID, MAP_ID_SUFFIX, SWEEP_INTERVAL,
   MARKER_PATHS, QUEST_MARKERS, ELIMINATION_BY_MAP,
-  nextPlacement, placementDue, questFromPlacement } = require('./state');
+  nextPlacement, placementDue, questFromPlacement } from './state';
+import type { MelodyStatus, Placement, QuestKey } from './state';
+import type { SweepBinding, SweepWorkerOutbound } from './worker-messages';
 
-function fail(message) {
+function fail(message: string): void {
   if (parentPort) {
-    parentPort.postMessage({ type: 'fatal', message });
+    const m: SweepWorkerOutbound = { type: 'fatal', message };
+    parentPort.postMessage(m);
   }
 }
 
@@ -40,7 +46,7 @@ function fail(message) {
 const HERO_RESCAN_SWEEPS = 4;
 
 /** Whether this sweep forces findHeroes to ignore the cache and scan. */
-function heroRescanDue(sweeps) {
+function heroRescanDue(sweeps: number): boolean {
   return (sweeps % HERO_RESCAN_SWEEPS) === 0;
 }
 
@@ -52,9 +58,8 @@ function heroRescanDue(sweeps) {
  * repeating the cache is equally pointless. Without a cache the first attempt
  * was already a scan, so there is no second source left to try.
  *
- * @returns {'cache'|'scan'|null}
  */
-function fallbackHeroSource(rescanDue, hadCache) {
+function fallbackHeroSource(rescanDue: boolean, hadCache: boolean): 'cache' | 'scan' | null {
   if (!hadCache) return null;
   return rescanDue ? 'cache' : 'scan';
 }
@@ -73,7 +78,12 @@ const MELODY_FAIL_SWEEPS = 3;
 // Melodies are per hero and survive map changes within a run, so only the run
 // ending clears -- map id -1 is the game's own "no map" reading, and map ids
 // start at 0, so this compares the value and never truthiness.
-function nextMelodies(prev, mapId, incoming, isRunReset = false) {
+function nextMelodies(
+  prev: MelodySlotView[] | null,
+  mapId: number | null,
+  incoming: MelodySlotView[] | null,
+  isRunReset = false,
+): MelodySlotView[] | null {
   if (mapId === -1 || isRunReset) return null;
   return incoming !== null ? incoming : prev;
 }
@@ -81,7 +91,9 @@ function nextMelodies(prev, mapId, incoming, isRunReset = false) {
 // 'pending' -> nothing has resolved yet. 'ok' -> a payload landed, and latches,
 // because a channel that worked once is not a broken channel. 'failed' -> it
 // has missed MELODY_FAIL_SWEEPS in a row without ever working.
-function nextMelodyStatus(prev, resolved, consecutiveMisses) {
+function nextMelodyStatus(
+  prev: MelodyStatus, resolved: boolean, consecutiveMisses: number,
+): MelodyStatus {
   if (resolved || prev === 'ok') return 'ok';
   return consecutiveMisses >= MELODY_FAIL_SWEEPS ? 'failed' : 'pending';
 }
@@ -98,7 +110,11 @@ function nextMelodyStatus(prev, resolved, consecutiveMisses) {
  * answers once should not need to answer again to stay trusted for this
  * generation.
  */
-function nextPlacementMisses(elimRule, placedNow, prevMisses) {
+function nextPlacementMisses(
+  elimRule: { readonly confirmed: QuestKey } | undefined,
+  placedNow: ReadonlyMap<string, number> | null,
+  prevMisses: number,
+): number {
   if (!elimRule || !placedNow) return prevMisses;
   const confirmedHit = QUEST_MARKERS[elimRule.confirmed].some(p => placedNow.has(p));
   return confirmedHit ? 0 : prevMisses + 1;
@@ -111,13 +127,15 @@ function nextPlacementMisses(elimRule, placedNow, prevMisses) {
  * sweep and merge into the accumulated table. A partial table resolved
  * early (at the menu or mid-load) must not freeze for the whole session.
  *
- * @param {Object|null} prev Previous accumulated map table, or null
- * @param {Object|null} index ValueIndex instance with .names and .resolve()
- * @returns {Object|null} Accumulated table, or null if no map id has ever resolved
+ * @param prev Previous accumulated map table, or null
+ * @param index ValueIndex instance with .names and .resolve()
+ * @returns Accumulated table, or null if no map id has ever resolved
  */
-function mergeMapNames(prev, index) {
-  if (!index || !index.names) return prev;
-  const m = {};
+function mergeMapNames(
+  prev: Record<number, string> | null, index: ValueIndex | null,
+): Record<number, string> | null {
+  if (!index) return prev;
+  const m: Record<number, string> = {};
   for (const name of index.names.keys()) {
     if (!name.endsWith(MAP_ID_SUFFIX) || name === CURRENT_MAP_ID) continue;
     const r = index.resolve(name);
@@ -160,12 +178,11 @@ function mergeMapNames(prev, index) {
  * strongest evidence, and they cost a build per map transition, a few per
  * run, instead of one per sweep.
  *
- * @param {boolean} hasIndex
- * @param {string[]} statuses One Resolution status per TRACKED_NAMES entry
- * @param {boolean} mapChanged
- * @param {boolean} runReset
+ * @param statuses One Resolution status per TRACKED_NAMES entry
  */
-function indexRebuildDue(hasIndex, statuses, mapChanged, runReset) {
+function indexRebuildDue(
+  hasIndex: boolean, statuses: readonly string[], mapChanged: boolean, runReset: boolean,
+): boolean {
   if (!hasIndex || mapChanged || runReset) return true;
   return statuses.some(s => s !== 'ok');
 }
@@ -174,9 +191,11 @@ function indexRebuildDue(hasIndex, statuses, mapChanged, runReset) {
  * Resolve every tracked name off `index`: the addresses the main thread
  * polls, and the status per name that indexRebuildDue decides on.
  */
-function resolveTracked(index) {
-  const found = {};
-  const statuses = [];
+function resolveTracked(
+  index: ValueIndex | null,
+): { found: Record<string, SweepBinding>; statuses: Resolution['status'][] } {
+  const found: Record<string, SweepBinding> = {};
+  const statuses: Resolution['status'][] = [];
   if (index === null) return { found, statuses };
   const types = values.valueTypes();
   for (const name of TRACKED_NAMES) {
@@ -192,10 +211,11 @@ function resolveTracked(index) {
   return { found, statuses };
 }
 
-async function main(pid, base) {
-  const proc = openProcess(pid);
-  const control = new WorkerControl(parentPort);
-  if (parentPort) parentPort.unref();
+async function main(pid: number, base: number, port: MessagePort): Promise<void> {
+  const proc = getProcessBackend().open(pid);
+  const control = new WorkerControl(port);
+  port.unref();
+  const post = (m: SweepWorkerOutbound): void => port.postMessage(m);
   try {
 
   const rvas = rtti.resolveVtableRvas(proc, base);
@@ -211,23 +231,23 @@ async function main(pid, base) {
   // empty-index diagnostic below says which constant went stale and how to
   // regenerate it.
   const bindingVt = base + values.BINDING_VTABLE_RVA;
-  parentPort.postMessage({ type: 'binding_vt', ready: true });
+  post({ type: 'binding_vt', ready: true });
 
-  const placementVtables = {};
-  const melodyVtables = {};
+  const placementVtables: PlacementCache = {};
+  const melodyVtables: MelodyVtables = {};
   let index = null;           // the held ValueIndex -- see indexRebuildDue
-  let melodyRegistry = null;
-  let cachedHeroes = null;
-  let placed = null;          // {mapId, placed: string[]} once resolved
-  let lastMapId = null;       // last resolved map id seen by the sweeper
-  let lastHeroLevel = null;   // last resolved hero level seen by the sweeper
+  let melodyRegistry: MelodyRegistry | null = null;
+  let cachedHeroes: number[] | null = null;
+  let placed: Placement | null = null;  // {mapId, placed: string[]} once resolved
+  let lastMapId: number | null = null;  // last resolved map id seen by the sweeper
+  let lastHeroLevel: number | null = null;  // last resolved hero level seen by the sweeper
   let conclusive = false;     // whether current generation has a conclusive answer
   let placementMisses = 0;    // consecutive real scans that missed the confirmed
                                // ELIMINATION_BY_MAP marker for this generation
-  let heldMelodies = null;    // last resolved payload, cleared when the run ends
+  let heldMelodies: MelodySlotView[] | null = null;  // last resolved payload, cleared when the run ends
   let melodyMisses = 0;       // consecutive sweeps that resolved no payload
-  let melodyStatus = 'pending';
-  let mapNames = null;
+  let melodyStatus: MelodyStatus = 'pending';
+  let mapNames: Record<number, string> | null = null;
   let sweeps = 0;
   let emptySweeps = 0;      // consecutive sweeps that built an index but resolved nothing
   let staleReported = false;
@@ -240,7 +260,7 @@ async function main(pid, base) {
   // otherwise sends a cooperative stop message.
   while (!control.stopped) {
     if (!proc.isAlive()) {
-      if (parentPort) parentPort.postMessage({ type: 'gone' });
+      post({ type: 'gone', message: 'target process exited' });
       break;
     }
 
@@ -303,7 +323,7 @@ async function main(pid, base) {
           // `placedNow`, not `found` -- the loop above already binds `found` for
           // the resolved value addresses, and shadowing it here would be a trap
           // for the next reader.
-          let placedNow = null;
+          let placedNow: Map<string, number> | null = null;
           try { placedNow = placement.placedAmong(proc, base, MARKER_PATHS, placementVtables); }
           catch { placedNow = null; }
           if (placedNow && questFromPlacement(mapName, new Set(placedNow.keys())) !== null) {
@@ -312,7 +332,8 @@ async function main(pid, base) {
           // Elimination miss-counting, independent of the pair test above --
           // see nextPlacementMisses for why a null scan doesn't advance it.
           placementMisses = nextPlacementMisses(
-            ELIMINATION_BY_MAP[mapName], placedNow, placementMisses);
+            mapName === null ? undefined : ELIMINATION_BY_MAP[mapName],
+            placedNow, placementMisses);
           placed = nextPlacement(placed, mapId, mapName, placedNow);
         }
       }
@@ -344,13 +365,11 @@ async function main(pid, base) {
       emptySweeps += 1;
       if (emptySweeps === 3 && !staleReported) {
         staleReported = true;
-        if (parentPort) {
-          parentPort.postMessage({ type: 'diagnostic', message:
-            `resolved 0 of ${TRACKED_NAMES.length} tracked values across three sweeps while `
-            + `the RTTI vtables resolved. If this persists inside a run, `
-            + `BINDING_VTABLE_RVA (0x${values.BINDING_VTABLE_RVA.toString(16).toUpperCase()}) `
-            + `is stale for this game build -- re-run tools/discover_values.py against it.` });
-        }
+        post({ type: 'diagnostic', message:
+          `resolved 0 of ${TRACKED_NAMES.length} tracked values across three sweeps while `
+          + `the RTTI vtables resolved. If this persists inside a run, `
+          + `BINDING_VTABLE_RVA (0x${values.BINDING_VTABLE_RVA.toString(16).toUpperCase()}) `
+          + `is stale for this game build -- re-run tools/discover_values.py against it.` });
       }
     } else if (Object.keys(found).length > 0) {
       emptySweeps = 0;
@@ -370,7 +389,7 @@ async function main(pid, base) {
       }
     }
 
-    let melodiesData = null;
+    let melodiesData: MelodySlotView[] | null = null;
     if (melodyRegistry !== null) {
       try {
         // Force a cold scan every HERO_RESCAN_SWEEPS sweeps. findHeroes
@@ -425,7 +444,7 @@ async function main(pid, base) {
     heldMelodies = nextMelodies(heldMelodies, lastMapId, melodiesData, runReset);
 
     sweeps += 1;
-    parentPort.postMessage({
+    post({
       type: 'sweep', found, mapNames, placement: placed, melodies: heldMelodies,
       melody_status: melodyStatus, sweeps,
       placement_misses: placementMisses,
@@ -441,11 +460,12 @@ async function main(pid, base) {
   }
 }
 
-module.exports = { mergeMapNames, heroRescanDue, fallbackHeroSource,
+export { mergeMapNames, heroRescanDue, fallbackHeroSource,
   nextMelodies, nextMelodyStatus, indexRebuildDue, resolveTracked,
   HERO_RESCAN_SWEEPS, MELODY_FAIL_SWEEPS, nextPlacementMisses };
 
-if (!isMainThread && workerData) {
-  const { pid, base } = workerData;
-  main(pid, base).catch(e => fail(String(e && e.message ? e.message : e)));
+if (!isMainThread && workerData && parentPort) {
+  const { pid, base } = workerData as { pid: number; base: number };
+  main(pid, base, parentPort).catch((e: unknown) => fail(
+    String(e instanceof Error && e.message ? e.message : e)));
 }

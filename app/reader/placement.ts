@@ -1,4 +1,3 @@
-'use strict';
 // Which entities the map generator actually placed.
 //
 // A spawned entity points at its source EntitySettingsResource from
@@ -27,8 +26,10 @@
 // paths sit in the process on any run, six and eight copies respectively on a
 // run that placed one of them.
 
-const rtti = require('./rtti');
-const { scanPointers, scanPointerRanges, scanStrings } = require('./scan');
+import * as rtti from './rtti';
+import { scanPointers, scanPointerRanges, scanStrings } from './scan';
+import type { ProcessHandle } from './process';
+
 /**
  * Every {const char *, uint32 len, uint32 flags} triple in an object.
  *
@@ -37,10 +38,10 @@ const { scanPointers, scanPointerRanges, scanStrings } = require('./scan');
  * the string triple this engine stores everywhere -- and placement is its
  * only real consumer. Exported for bench/placement-profile.js.
  */
-function objectStrings(proc, obj, size = 0x400) {
+export function objectStrings(proc: ProcessHandle, obj: number, size = 0x400): string[] {
   const blob = proc.read(obj, size);
   if (!blob) return [];
-  const out = [];
+  const out: string[] = [];
   for (let off = 0; off + 16 <= blob.length; off += 8) {
     const ptr = blob.readUInt32LE(off + 4) * 4294967296 + blob.readUInt32LE(off);
     const length = blob.readUInt32LE(off + 8) & 0x7FFFFFFF;
@@ -48,14 +49,17 @@ function objectStrings(proc, obj, size = 0x400) {
     const str = proc.read(ptr, length);
     if (!str || str.length < length) continue;
     let printable = true;
-    for (let i = 0; i < length; i++) if (str[i] < 0x20 || str[i] > 0x7e) { printable = false; break; }
+    for (let i = 0; i < length; i++) {
+      const c = str[i] ?? 0;
+      if (c < 0x20 || c > 0x7e) { printable = false; break; }
+    }
     if (printable) out.push(str.toString('latin1'));
   }
   return out;
 }
 
-const ENTITY_RTTI = '.?AVoCEntity@@\0';
-const ENTITY_RESOURCE_OFFSET = 0x38;
+export const ENTITY_RTTI = '.?AVoCEntity@@\0';
+export const ENTITY_RESOURCE_OFFSET = 0x38;
 // How far back from a path triple the resource object's own base can sit.
 // Probing a window rather than a fixed offset keeps this working across a
 // layout shift; the exact attribution is done afterwards by re-reading the
@@ -64,31 +68,42 @@ const ENTITY_RESOURCE_OFFSET = 0x38;
 //
 // The window is asked as a RANGE, not as its 41 individual addresses. Spelling
 // it out as targets for an equality scan was 94% of this function's runtime --
-// see scanPointerRanges in scan.js for the measurement and the mechanism.
-const RESOURCE_OBJECT_WINDOW = 0x140;
+// see scanPointerRanges in scan.ts for the measurement and the mechanism.
+export const RESOURCE_OBJECT_WINDOW = 0x140;
+
+/** The mutable memo placedAmong fills: oCEntity vtable RVAs. */
+export interface PlacementCache {
+  entity?: number[];
+}
 
 /**
- * @param {Process} proc
- * @param {number}  base    module base
- * @param {string[]} paths  .entity.ot resource paths to ask about
- * @param {object}  cache   mutable memo; cache.entity holds vtable RVAs
- * @returns {Map<string, number>|null} path -> distinct live entity count, for
- *          the subset that has any. null when oCEntity could not be resolved.
+ * @param base    module base
+ * @param paths   .entity.ot resource paths to ask about
+ * @param cache   mutable memo; cache.entity holds vtable RVAs
+ * @returns path -> distinct live entity count, for the subset that has any.
+ *          null when oCEntity could not be resolved.
  */
-function placedAmong(proc, base, paths, cache) {
-  const out = new Map();
+export function placedAmong(
+  proc: ProcessHandle,
+  base: number,
+  paths: readonly string[] | null | undefined,
+  cache: PlacementCache,
+): Map<string, number> | null {
+  const out = new Map<string, number>();
   if (!paths || !paths.length) return out;
 
-  if (!cache.entity) {
+  let entityRvas = cache.entity;
+  if (!entityRvas) {
     const rvas = rtti.resolveAllVtableRvas(proc, base, ENTITY_RTTI);
     if (!rvas.length) return null;
+    entityRvas = rvas;
     cache.entity = rvas;
   }
-  const entityVts = new Set(cache.entity.map(r => base + r));
+  const entityVts = new Set(entityRvas.map(r => base + r));
 
   // 1. Where each path string lives. Residency proves nothing on its own.
   const strings = scanStrings(proc, paths);
-  const pathOfString = new Map();
+  const pathOfString = new Map<number, string>();
   for (const p of paths) {
     for (const a of strings.get(p) || []) pathOfString.set(a, p);
   }
@@ -102,9 +117,11 @@ function placedAmong(proc, base, paths, cache) {
   //    the window that ends at a path triple. Overlapping windows need no
   //    dedupe -- the result is keyed by the value actually found, so a base
   //    reachable from two triples lands in one entry either way.
-  const ranges = [];
+  const ranges: [number, number][] = [];
   for (const sites of triples.values()) {
-    for (const t of sites) ranges.push([t - RESOURCE_OBJECT_WINDOW, t]);
+    for (const t of sites) {
+      if (typeof t === 'number') ranges.push([t - RESOURCE_OBJECT_WINDOW, t]);
+    }
   }
   if (!ranges.length) return out;
   const refs = scanPointerRanges(proc, ranges);
@@ -113,30 +130,26 @@ function placedAmong(proc, base, paths, cache) {
   //    path the object really carries rather than to every path whose triple
   //    fell inside the probe window.
   const wanted = new Set(paths);
-  const ents = new Map();
+  const ents = new Map<string, Set<number>>();
   for (const [obj, sites] of refs) {
     if (!sites.length) continue;
-    let carried = null;
+    let carried: string[] | null = null;
     for (const r of sites) {
       const ent = r - ENTITY_RESOURCE_OFFSET;
-      if (!entityVts.has(proc.readPtr(ent))) continue;
+      const vt = proc.readPtr(ent);
+      if (vt === null || !entityVts.has(vt)) continue;
       if (carried === null) {
         carried = objectStrings(proc, obj, RESOURCE_OBJECT_WINDOW + 0x20)
           .filter(s => wanted.has(s));
         if (!carried.length) break;
       }
       for (const p of carried) {
-        if (!ents.has(p)) ents.set(p, new Set());
-        ents.get(p).add(ent);
+        let set = ents.get(p);
+        if (set === undefined) { set = new Set(); ents.set(p, set); }
+        set.add(ent);
       }
     }
   }
   for (const [p, set] of ents) out.set(p, set.size);
   return out;
 }
-
-module.exports = {
-  objectStrings,
-  ENTITY_RTTI, ENTITY_RESOURCE_OFFSET, RESOURCE_OBJECT_WINDOW,
-  placedAmong,
-};

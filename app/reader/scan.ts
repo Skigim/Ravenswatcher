@@ -1,4 +1,3 @@
-'use strict';
 // The sweep primitive: every 8-byte-aligned occurrence of a set of target
 // qwords across a process's committed memory, in one pass.
 //
@@ -17,10 +16,51 @@
 //
 // No BigInt anywhere in the loop -- BigUint64Array compares measured ~4x
 // slower than the split-word Uint32Array form.
+//
+// `?? 0` on a Uint32Array read inside the loops exists only because
+// noUncheckedIndexedAccess types every index as possibly undefined; the
+// indices are in range by construction, so the fallback never fires.
 
-const { scratch } = require('./scratch');
+import { scratch } from './scratch';
+import type { Scratch } from './scratch';
 
-const CHUNK_SIZE = 64 * 1024 * 1024;
+/**
+ * What a heap scan needs from its source. Strictly more than ByteSource:
+ * scanning enumerates regions and reads into external memory, neither of
+ * which a file-backed source can do. scanPointers never calls .read(), so
+ * PeFileSource (which has only .read()) must not typecheck as a ScanSource.
+ * ProcessHandle satisfies it.
+ */
+export interface ScanSource {
+  /**
+   * Committed, readable regions as [base, size]. `writableOnly` restricts to
+   * the protection set heap objects actually live in.
+   */
+  regions(writableOnly?: boolean): Iterable<readonly [number, number]>;
+  /** Raw read into caller-provided scratch memory. Returns bytes read, 0 on failure. */
+  readInto(addr: number, dst: Buffer, size: number): number;
+  readPtr(addr: number): number | null;
+}
+
+/** A hit: the address, or [address, preceding qword] for a withPrev target. */
+export type PointerHit = number | [number, number];
+
+export interface ScanPointersOptions {
+  /** Restrict to the writable protection set -- heap objects only live there. */
+  writableOnly?: boolean;
+  /**
+   * Targets for which the qword PRECEDING each hit is harvested from the same
+   * buffer. Those targets' entries come back as [hitAddr, prevQword] pairs
+   * instead of bare addresses.
+   */
+  withPrev?: readonly number[];
+}
+
+export interface ScanOptions {
+  writableOnly?: boolean;
+}
+
+export const CHUNK_SIZE = 64 * 1024 * 1024;
 // Granularity of the re-read after a chunk read fails. 64 KB is the
 // allocation granularity VirtualQuery reports regions on, so it is the
 // smallest unit worth retrying at: it bounds the loss at 64 KB while keeping
@@ -35,8 +75,12 @@ const RETRY_SIZE = 64 * 1024;
 
 const PREFILTER_BITS = 13;
 
-let _buf = null;
-function buffers() {
+interface ScanBuffers extends Scratch {
+  u32: Uint32Array;
+}
+
+let _buf: ScanBuffers | null = null;
+function buffers(): ScanBuffers {
   if (_buf === null) {
     const s = scratch(CHUNK_SIZE);
     _buf = { ...s, u32: new Uint32Array(s.ab) };
@@ -58,7 +102,9 @@ function buffers() {
  * in, and costs nothing on the overwhelmingly common path where the first
  * read succeeds.
  */
-function* iterChunks(proc, writableOnly = true) {
+export function* iterChunks(
+  proc: ScanSource, writableOnly = true,
+): Generator<[number, number], void, undefined> {
   const b = buffers();
   for (const [base, size] of proc.regions(writableOnly)) {
     let off = 0;
@@ -77,7 +123,9 @@ function* iterChunks(proc, writableOnly = true) {
  * come back. Pieces land in the same shared buffer, so a consumer sees each
  * one exactly as it sees a whole chunk.
  */
-function* retryInPieces(proc, b, base, size) {
+function* retryInPieces(
+  proc: ScanSource, b: ScanBuffers, base: number, size: number,
+): Generator<[number, number], void, undefined> {
   let off = 0;
   while (off < size) {
     const n = Math.min(size - off, RETRY_SIZE);
@@ -88,16 +136,24 @@ function* retryInPieces(proc, b, base, size) {
 }
 
 /**
- * @param {Process} proc
- * @param {number[]} targets  qword values to find (plain Numbers)
- * @param {object}   opts     {writableOnly=true, withPrev=[]}
- * @returns {Map<number, Array>}  target -> [addr, ...], or [[addr, prevQword], ...]
- *          for targets listed in withPrev.
+ * @param targets  qword values to find (plain Numbers)
+ * @returns target -> [addr, ...], or [[addr, prevQword], ...] for targets
+ *          listed in withPrev. Every requested target is present.
  */
-function scanPointers(proc, targets, opts = {}) {
+export function scanPointers(
+  proc: ScanSource,
+  targets: readonly number[],
+  opts: ScanPointersOptions = {},
+): Map<number, PointerHit[]> {
   const { writableOnly = true, withPrev = [] } = opts;
   const uniq = [...new Set(targets)];
-  const out = new Map(uniq.map(t => [t, []]));
+  const out = new Map<number, PointerHit[]>();
+  const lists: PointerHit[][] = [];
+  for (const t of uniq) {
+    const l: PointerHit[] = [];
+    lists.push(l);
+    out.set(t, l);
+  }
   if (!uniq.length) return out;
 
   const prevSet = new Set(withPrev);
@@ -105,53 +161,54 @@ function scanPointers(proc, targets, opts = {}) {
   const lo = new Uint32Array(T);
   const hi = new Uint32Array(T);
   const wantPrev = new Uint8Array(T);
-  for (let i = 0; i < T; i++) {
-    lo[i] = uniq[i] >>> 0;
-    hi[i] = Math.floor(uniq[i] / 4294967296) >>> 0;
-    wantPrev[i] = prevSet.has(uniq[i]) ? 1 : 0;
-  }
-
   const MASK = (1 << PREFILTER_BITS) - 1;
   const tbl = new Uint8Array(MASK + 1);
-  for (let i = 0; i < T; i++) tbl[lo[i] & MASK] = 1;
+  for (const [i, t] of uniq.entries()) {
+    const low = t >>> 0;
+    lo[i] = low;
+    hi[i] = Math.floor(t / 4294967296) >>> 0;
+    wantPrev[i] = prevSet.has(t) ? 1 : 0;
+    tbl[low & MASK] = 1;
+  }
 
   const b = buffers();
   const u32 = b.u32;
-  const lists = uniq.map(t => out.get(t));
 
-  const record = (t, i, chunkBase) => {
+  const record = (t: number, i: number, chunkBase: number): void => {
     const addr = chunkBase + i * 4;
+    const list = lists[t];
+    if (list === undefined) return;
     if (wantPrev[t]) {
       // The qword right before the hit, harvested from the same buffer
       // rather than costing a ReadProcessMemory per candidate.
-      const prev = i >= 2 ? u32[i - 1] * 4294967296 + u32[i - 2] : 0;
-      lists[t].push([addr, prev]);
+      const prev = i >= 2 ? (u32[i - 1] ?? 0) * 4294967296 + (u32[i - 2] ?? 0) : 0;
+      list.push([addr, prev]);
     } else {
-      lists[t].push(addr);
+      list.push(addr);
     }
   };
 
   for (const [chunkBase, nq] of iterChunks(proc, writableOnly)) {
     const n = nq * 2;
     if (T === 1) {
-      const lo0 = lo[0], hi0 = hi[0];
+      const lo0 = lo[0] ?? 0, hi0 = hi[0] ?? 0;
       for (let i = 0; i < n; i += 2) {
         if (u32[i] === lo0 && u32[i + 1] === hi0) record(0, i, chunkBase);
       }
     } else if (T === 2) {
       // buildIndex's own case: settings vtable + binding vtable. Two
       // direct compares beat the prefilter table when there are only two.
-      const lo0 = lo[0], hi0 = hi[0], lo1 = lo[1], hi1 = hi[1];
+      const lo0 = lo[0] ?? 0, hi0 = hi[0] ?? 0, lo1 = lo[1] ?? 0, hi1 = hi[1] ?? 0;
       for (let i = 0; i < n; i += 2) {
-        const v = u32[i];
+        const v = u32[i] ?? 0;
         if (v === lo0) { if (u32[i + 1] === hi0) record(0, i, chunkBase); }
         else if (v === lo1) { if (u32[i + 1] === hi1) record(1, i, chunkBase); }
       }
     } else {
       for (let i = 0; i < n; i += 2) {
-        const v = u32[i];
+        const v = u32[i] ?? 0;
         if (tbl[v & MASK] === 0) continue;
-        const h = u32[i + 1];
+        const h = u32[i + 1] ?? 0;
         for (let t = 0; t < T; t++) {
           if (v !== lo[t] || h !== hi[t]) continue;
           record(t, i, chunkBase);
@@ -166,8 +223,9 @@ function scanPointers(proc, targets, opts = {}) {
   for (let t = 0; t < T; t++) {
     if (!wantPrev[t]) continue;
     const list = lists[t];
-    for (let i = 0; i < list.length; i++) {
-      if (list[i][1] === 0) list[i][1] = proc.readPtr(list[i][0] - 8) || 0;
+    if (list === undefined) continue;
+    for (const hit of list) {
+      if (Array.isArray(hit) && hit[1] === 0) hit[1] = proc.readPtr(hit[0] - 8) ?? 0;
     }
   }
   return out;
@@ -191,22 +249,23 @@ function scanPointers(proc, targets, opts = {}) {
  * (a 0x140 window touches at most two keys), so 30 windows set ~60 slots out of
  * a million and the early-out rejects essentially everything again.
  *
- * @param {Process} proc
- * @param {Array<[number, number]>} ranges  [lo, hi] inclusive, plain Numbers
- * @param {object} opts  {writableOnly=true}
- * @returns {Map<number, number[]>}  found value -> addresses holding it
+ * @param ranges  [lo, hi] inclusive, plain Numbers
+ * @returns found value -> addresses holding it
  */
 const RANGE_SHIFT = 9;                        // 512-byte prefilter granularity
 const RANGE_BITS = 20;
-function scanPointerRanges(proc, ranges, opts = {}) {
+export function scanPointerRanges(
+  proc: ScanSource,
+  ranges: readonly (readonly [number, number])[] | null | undefined,
+  opts: ScanOptions = {},
+): Map<number, number[]> {
   const { writableOnly = true } = opts;
-  const out = new Map();
+  const out = new Map<number, number[]>();
   if (!ranges || !ranges.length) return out;
 
   const R = ranges.length;
   const rlo = new Float64Array(R);
   const rhi = new Float64Array(R);
-  for (let i = 0; i < R; i++) { rlo[i] = ranges[i][0]; rhi[i] = ranges[i][1]; }
 
   // Key off the low word only. `a >>> 0` is ToUint32, i.e. exactly the low 32
   // bits, so an address above 4 GB keys correctly and a range that happens to
@@ -215,9 +274,11 @@ function scanPointerRanges(proc, ranges, opts = {}) {
   const MASK = (1 << RANGE_BITS) - 1;
   const tbl = new Uint8Array(MASK + 1);
   const STEP = 1 << RANGE_SHIFT;
-  for (let i = 0; i < R; i++) {
-    for (let a = rlo[i]; a <= rhi[i]; a += STEP) tbl[((a >>> 0) >>> RANGE_SHIFT) & MASK] = 1;
-    tbl[((rhi[i] >>> 0) >>> RANGE_SHIFT) & MASK] = 1;
+  for (const [i, [rangeLo, rangeHi]] of ranges.entries()) {
+    rlo[i] = rangeLo;
+    rhi[i] = rangeHi;
+    for (let a = rangeLo; a <= rangeHi; a += STEP) tbl[((a >>> 0) >>> RANGE_SHIFT) & MASK] = 1;
+    tbl[((rangeHi >>> 0) >>> RANGE_SHIFT) & MASK] = 1;
   }
 
   const b = buffers();
@@ -225,11 +286,11 @@ function scanPointerRanges(proc, ranges, opts = {}) {
   for (const [chunkBase, nq] of iterChunks(proc, writableOnly)) {
     const n = nq * 2;
     for (let i = 0; i < n; i += 2) {
-      const v = u32[i];
+      const v = u32[i] ?? 0;
       if (tbl[(v >>> RANGE_SHIFT) & MASK] === 0) continue;
-      const val = u32[i + 1] * 4294967296 + v;
+      const val = (u32[i + 1] ?? 0) * 4294967296 + v;
       for (let r = 0; r < R; r++) {
-        if (val < rlo[r] || val > rhi[r]) continue;
+        if (val < (rlo[r] ?? Infinity) || val > (rhi[r] ?? -Infinity)) continue;
         const addr = chunkBase + i * 4;
         const list = out.get(val);
         if (list === undefined) out.set(val, [addr]); else list.push(addr);
@@ -256,29 +317,30 @@ function scanPointerRanges(proc, ranges, opts = {}) {
  * every path observed live is resident in several copies, and a miss costs
  * one inconclusive read rather than a wrong one.
  */
-function scanStrings(proc, needles, opts = {}) {
+export function scanStrings(
+  proc: ScanSource,
+  needles: readonly string[],
+  opts: ScanOptions = {},
+): Map<string, number[]> {
   const { writableOnly = true } = opts;
   const uniq = [...new Set(needles)];
-  const out = new Map(uniq.map(n => [n, []]));
+  const targets = uniq.map(n => ({
+    needle: n, pat: Buffer.from(n + '\0', 'latin1'), hits: [] as number[],
+  }));
+  const out = new Map<string, number[]>(targets.map(t => [t.needle, t.hits]));
   if (!uniq.length) return out;
-  const pats = uniq.map(n => Buffer.from(n + '\0', 'latin1'));
   const b = buffers();
   for (const [chunkBase, nq] of iterChunks(proc, writableOnly)) {
     const view = b.ptr.subarray(0, nq * 8);
-    for (let i = 0; i < uniq.length; i++) {
-      const list = out.get(uniq[i]);
+    for (const { pat, hits } of targets) {
       let pos = 0;
       for (;;) {
-        const idx = view.indexOf(pats[i], pos);
+        const idx = view.indexOf(pat, pos);
         if (idx === -1) break;
-        list.push(chunkBase + idx);
+        hits.push(chunkBase + idx);
         pos = idx + 1;
       }
     }
   }
   return out;
 }
-
-module.exports = {
-  scanPointers, scanPointerRanges, scanStrings, iterChunks, CHUNK_SIZE,
-};

@@ -1,4 +1,3 @@
-'use strict';
 // Win32 bindings for the reader, via koffi (pure-JS FFI over prebuilt
 // Node-API binaries -- no node-gyp, no per-Electron-ABI rebuild).
 //
@@ -12,14 +11,21 @@
 // needs BigInt -- which matters, because BigInt in the scan loop costs ~4x
 // (see bench/scan-bench.js).
 
-const koffi = require('koffi');
-const { scratch } = require('./scratch');
+// koffi's typings are ESM-only; a type-only import resolved as ESM is allowed
+// from CommonJS, and the runtime require() is untouched.
+import type * as Koffi from 'koffi' with { 'resolution-mode': 'import' };
+import { scratch } from './scratch';
+import type {
+  MemoryRegion, ModuleInfo, ProcessBackend, ProcessCandidate, ProcessHandle,
+} from './process';
+
+const koffi: typeof Koffi = require('koffi');
 
 const k32 = koffi.load('kernel32.dll');
 
-const PROCESS_QUERY_INFORMATION = 0x0400;
-const PROCESS_VM_READ = 0x0010;
-const READ_ONLY_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ;
+export const PROCESS_QUERY_INFORMATION = 0x0400;
+export const PROCESS_VM_READ = 0x0010;
+export const READ_ONLY_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ;
 
 const MEM_COMMIT = 0x1000;
 const PAGE_NOACCESS = 0x01;
@@ -31,7 +37,7 @@ const WRITABLE = new Set([0x04, 0x08, 0x40, 0x80]);
 // It is only readable through PROCESS_QUERY_INFORMATION, which the read-only
 // mask above already carries -- no wider access is needed to ask whether the
 // target is alive.
-const STILL_ACTIVE = 259;
+export const STILL_ACTIVE = 259;
 
 const TH32CS_SNAPPROCESS = 0x00000002;
 const TH32CS_SNAPMODULE = 0x00000008;
@@ -55,7 +61,7 @@ const Module32FirstW = k32.func('__stdcall', 'Module32FirstW', 'bool', ['void *'
 
 /** CreateToolhelp32Snapshot signals failure with INVALID_HANDLE_VALUE (-1),
  *  not NULL, and koffi hands that back as a non-null external pointer. */
-function isRealHandle(h) {
+function isRealHandle(h: unknown): boolean {
   return !!h && koffi.address(h) !== INVALID_HANDLE_VALUE;
 }
 
@@ -64,18 +70,21 @@ function isRealHandle(h) {
 // MEMORY_BASIC_INFORMATION (x64): BaseAddress 0x00, AllocationBase 0x08,
 // AllocationProtect 0x10, PartitionId 0x14, RegionSize 0x18, State 0x20,
 // Protect 0x24, Type 0x28. sizeof == 0x30.
-const MBI_SIZE = 0x30;
+export const MBI_SIZE = 0x30;
 const _mbi = scratch(MBI_SIZE);
-const _read = [0];
+const _read: number[] = [0];
 
-class Process {
-  constructor(handle, pid) {
+export class Process implements ProcessHandle {
+  readonly handle: unknown;
+  readonly pid: number;
+  private _closed = false;
+
+  constructor(handle: unknown, pid: number) {
     this.handle = handle;
     this.pid = pid;
-    this._closed = false;
   }
 
-  close() {
+  close(): void {
     if (!this._closed) { CloseHandle(this.handle); this._closed = true; }
   }
 
@@ -94,9 +103,9 @@ class Process {
    * accepted here: the fallback is exactly today's behaviour (poll a dead
    * handle and report nothing), and the game does not exit with 259.
    */
-  isAlive() {
+  isAlive(): boolean {
     if (this._closed) return false;
-    const code = [0];
+    const code: number[] = [0];
     // A failed call means the handle can no longer answer for the process --
     // treat that as gone rather than guessing it is still there.
     if (!GetExitCodeProcess(this.handle, code)) return false;
@@ -104,10 +113,10 @@ class Process {
   }
 
   /** Raw read into caller-provided external memory. Returns bytes read. */
-  readInto(addr, dstPtr, size) {
+  readInto(addr: number, dstPtr: Buffer, size: number): number {
     _read[0] = 0;
     const ok = ReadProcessMemory(this.handle, addr, dstPtr, size, _read);
-    return ok ? _read[0] : 0;
+    return ok ? (_read[0] ?? 0) : 0;
   }
 
   /**
@@ -119,7 +128,7 @@ class Process {
    * ~434 instances the game is documented to have. The result is always
    * copied out, so reusing the scratch across calls cannot alias.
    */
-  read(addr, size) {
+  read(addr: number, size: number): Buffer | null {
     if (size > _readScratch.size) {
       const s = scratch(size);
       const n = this.readInto(addr, s.ptr, size);
@@ -131,7 +140,7 @@ class Process {
   }
 
   /** uint64 at addr as a Number, or null. Mirrors read_ptr. */
-  readPtr(addr) {
+  readPtr(addr: number): number | null {
     const n = this.readInto(addr, _ptr8.ptr, 8);
     if (n < 8) return null;
     const lo = _ptr8.dv.getUint32(0, true);
@@ -140,7 +149,7 @@ class Process {
   }
 
   /** int32 at addr, or null. Mirrors read_i32. */
-  readI32(addr) {
+  readI32(addr: number): number | null {
     const n = this.readInto(addr, _ptr8.ptr, 4);
     if (n < 4) return null;
     return _ptr8.dv.getInt32(0, true);
@@ -152,7 +161,7 @@ class Process {
    * and including image-backed pages faults them in from disk for zero
    * additional hits.
    */
-  *regions(writableOnly = false) {
+  *regions(writableOnly = false): Generator<MemoryRegion, void, undefined> {
     let address = 0;
     const LIMIT = 0x7FFFFFFFFFFF;
     while (address < LIMIT) {
@@ -182,24 +191,24 @@ const _ptr8 = scratch(16);
 const _readScratch = scratch(8 * 1024 * 1024);
 
 /** Read-only open. There is deliberately no access-mask parameter. */
-function openProcess(pid) {
+export function openProcess(pid: number): Process {
   const h = OpenProcess(READ_ONLY_ACCESS, false, pid);
   if (!h) throw new Error(`OpenProcess(${pid}) failed, GetLastError=${GetLastError()}`);
   return new Process(h, pid);
 }
 
 // PROCESSENTRY32W (x64): dwSize 0x00, th32ProcessID 0x08, szExeFile 0x2C.
-const PE32_SIZE = 568;
+export const PE32_SIZE = 568;
 const PE32_EXE_OFF = 0x2c;
 
 /** Every PID whose image name matches, case-insensitively. */
-function findPids(exeName) {
+export function findPids(exeName: string): number[] {
   const snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (!isRealHandle(snap)) throw new Error('CreateToolhelp32Snapshot failed');
   const s = scratch(PE32_SIZE);
   s.dv.setUint32(0, PE32_SIZE, true);
   const target = exeName.toLowerCase();
-  const pids = [];
+  const pids: number[] = [];
   try {
     let ok = Process32FirstW(snap, s.ptr);
     while (ok) {
@@ -220,10 +229,10 @@ function findPids(exeName) {
  * The one running copy's PID. Refuses rather than guessing when zero or
  * several are running -- same contract as discover_values.find_pid().
  */
-function findPid(exeName) {
+export function findPid(exeName: string): number {
   const pids = findPids(exeName);
   if (!pids.length) {
-    const err = new Error(`${exeName} is not running -- start the game first, or pass a PID explicitly`);
+    const err: Error & { code?: string } = new Error(`${exeName} is not running -- start the game first, or pass a PID explicitly`);
     // Tagged, not matched on by message: stdio.js exits with a distinct
     // status for this case so the supervisor can retry at a steady cadence
     // instead of backing off as it would for a genuine fault. Note that the
@@ -236,12 +245,14 @@ function findPid(exeName) {
   if (pids.length > 1) {
     throw new Error(`more than one ${exeName} is running (${pids.join(', ')}) -- pass the PID you want explicitly`);
   }
-  return pids[0];
+  const [pid] = pids;
+  if (pid === undefined) throw new Error('unreachable: pid list emptied');
+  return pid;
 }
 
 // MODULEENTRY32W (x64): dwSize 0x00, modBaseAddr 0x18, modBaseSize 0x20,
 // szExePath 0x230 (WCHAR[MAX_PATH], null-terminated).
-const ME32_SIZE = 1080;
+export const ME32_SIZE = 1080;
 const ME32_EXE_PATH_OFF = 0x230;
 
 /**
@@ -252,7 +263,7 @@ const ME32_EXE_PATH_OFF = 0x230;
  * carries the executable's full path, which is how the app finds the game's
  * install directory without a second API call.
  */
-function moduleBase(pid) {
+export function moduleBase(pid: number): ModuleInfo {
   const snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
   if (!isRealHandle(snap)) {
     throw new Error(`could not read the module base for PID ${pid} -- check the PID, `
@@ -276,17 +287,14 @@ function moduleBase(pid) {
   }
 }
 
-module.exports = {
-  koffi,
-  openProcess,
-  findPid,
-  findPids,
-  moduleBase,
-  READ_ONLY_ACCESS,
-  PROCESS_QUERY_INFORMATION,
-  PROCESS_VM_READ,
-  STILL_ACTIVE,
-  MBI_SIZE,
-  PE32_SIZE,
-  ME32_SIZE,
+export { koffi };
+
+/** The Windows ProcessBackend: a thin adapter over the functions above. */
+export const win32Backend: ProcessBackend = {
+  platform: 'win32',
+  findProcesses(exeName: string): ProcessCandidate[] {
+    return findPids(exeName).map(pid => ({ pid }));
+  },
+  moduleInfo: moduleBase,
+  open: openProcess,
 };

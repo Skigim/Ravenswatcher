@@ -29,10 +29,7 @@ import type { SandmanOffer, SandmanStatus, SandmanSource, ResolvedVtables } from
 import { pollBinding } from './values';
 import { WorkerControl } from './worker-control';
 import type { SandmanWorkerInbound, SandmanWorkerOutbound } from './worker-messages';
-
-// win32.js is still JavaScript; require it directly.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { openProcess } = require('./win32');
+import { getProcessBackend } from './backend';
 
 export const SANDMAN_POLL_MS = 100;
 export const CONTROLLER_RESCAN_MS = 2000;
@@ -70,7 +67,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   const control = new WorkerControl(parentPort);
   let proc: WorkerProcess;
   try {
-    proc = openProcess(pid) as WorkerProcess;
+    proc = getProcessBackend().open(pid);
   } catch (e) {
     control.dispose();
     return fail(e instanceof Error ? e.message : String(e));
