@@ -111,3 +111,24 @@
 /app/share.js
 /app/share.js.map
 /app/share.d.ts
+
+/app/lifecycle.js
+/app/lifecycle.js.map
+/app/lifecycle.d.ts
+/app/external-links.js
+/app/external-links.js.map
+/app/external-links.d.ts
+/app/update.js
+/app/update.js.map
+/app/update.d.ts
+
+# Electron shell, ported to TypeScript.
+/app/sidecar.js
+/app/sidecar.js.map
+/app/sidecar.d.ts
+/app/preload.js
+/app/preload.js.map
+/app/preload.d.ts
+/app/main.js
+/app/main.js.map
+/app/main.d.ts

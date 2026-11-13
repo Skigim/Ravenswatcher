@@ -1,7 +1,8 @@
 // Preload script, running in the isolated context contextIsolation creates.
 //
-// Exposes subscriptions plus three narrowly scoped history-deletion requests.
-// No general-purpose IPC or filesystem access crosses the bridge.
+// Exposes subscriptions, three narrowly scoped history-deletion requests and
+// the window-chrome requests (minimize, maximize, close). No general-purpose
+// IPC or filesystem access crosses the bridge.
 //
 // Channel names are inlined below, NOT required from a shared ./channels.js
 // module: BrowserWindow's webPreferences omits `sandbox`, and per current
@@ -17,26 +18,34 @@
 // against the shipped app/node_modules/electron/dist/electron.exe, whose
 // sandboxed-preload `preloadRequire` resolves only from a fixed
 // `loadableModules` map and throws `module not found` for anything else.
-// KEEP THESE LITERALS IN SYNC WITH app/main.js's copy -- there is no
+// The type-only import below is erased at compile time, so it adds no
+// require() to the emitted file.
+// KEEP THESE LITERALS IN SYNC WITH app/main.ts's copy -- there is no
 // shared module to fall out of sync silently against; grep both files for
 // 'readout:' if you change any.
+import { contextBridge, ipcRenderer } from 'electron';
+import type { IpcRendererEvent } from 'electron';
+import type { RavenswatchApi, Subscribe } from './preload-api';
+
 const STATE_CHANNEL = 'readout:state';
 const SIDECAR_DOWN_CHANNEL = 'readout:sidecar-down';
 const ASSETS_CHANNEL = 'readout:assets';
 const UPDATE_CHANNEL = 'readout:update';
 const HISTORY_CHANNEL = 'readout:history';
+const WINDOW_STATE_CHANNEL = 'readout:window-state';
 
-const { contextBridge, ipcRenderer } = require('electron');
-
-function subscribe(channel) {
+function subscribe<T>(channel: string): Subscribe<T> {
   return (callback) => {
-    const listener = (_event, payload) => callback(payload);
+    const listener = (_event: IpcRendererEvent, payload: T): void => callback(payload);
     ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
+    return () => { ipcRenderer.removeListener(channel, listener); };
   };
 }
 
-contextBridge.exposeInMainWorld('ravenswatch', {
+const api: RavenswatchApi = {
+  // process.platform, so the page can pick its title-bar layout.
+  platform: process.platform,
+
   // callback(frame) fires once per parsed JSON object the sidecar wrote to
   // stdout. Returns an unsubscribe function; app/web/app.js doesn't need
   // it today (one subscription for the page's lifetime) but a leak-free
@@ -65,4 +74,14 @@ contextBridge.exposeInMainWorld('ravenswatch', {
   prepareHistoryDeletion: (input) => ipcRenderer.invoke('readout:history-delete-prepare', input),
   confirmHistoryDeletion: (input) => ipcRenderer.invoke('readout:history-delete-confirm', input),
   cancelHistoryDeletion: (token) => ipcRenderer.invoke('readout:history-delete-cancel', token),
-});
+
+  // Window chrome. The main process validates the sender and the action
+  // string; the page only names one of three fixed actions.
+  windowAction: (action) => ipcRenderer.invoke('readout:window-action', action),
+  getWindowState: () => ipcRenderer.invoke('readout:window-get-state'),
+  // callback({maximized, focused, fullScreen}) fires on maximize, unmaximize,
+  // focus, blur and entering or leaving full screen.
+  onWindowState: subscribe(WINDOW_STATE_CHANNEL),
+};
+
+contextBridge.exposeInMainWorld('ravenswatch', api);

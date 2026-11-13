@@ -11,34 +11,60 @@
 // The download link is built from the tag rather than read from html_url,
 // so it is always a github.com URL that external-links.js lets out.
 
-const LATEST_URL = 'https://api.github.com/repos/Skigim/Ravenswatcher/releases/latest';
+export const LATEST_URL = 'https://api.github.com/repos/Skigim/Ravenswatcher/releases/latest';
 const TAG_PAGE = 'https://github.com/Skigim/Ravenswatcher/releases/tag/';
 const TIMEOUT_MS = 5000;
+
+export interface UpdateCheck {
+  current: string;
+  ok: boolean;
+  latest: string | null;
+  url: string | null;
+  reason: string | null;
+}
+
+/** The subset of fetch this module calls. Electron's net.fetch satisfies it. */
+export type FetchLike = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+
+function messageOf(err: unknown): string {
+  if (typeof err === 'object' && err !== null && 'message' in err && err.message) return String(err.message);
+  return String(err);
+}
+
+function hasTagName(x: unknown): x is { tag_name: string } {
+  return typeof x === 'object' && x !== null && 'tag_name' in x && typeof x.tag_name === 'string';
+}
 
 /** `0.1.4` or `v0.1.4` -> [0, 1, 4]. Anything else, including a prerelease
  * suffix, is null: the release workflow never publishes one, and refusing
  * to order it is safer than guessing. */
-function parseVersion(s) {
+export function parseVersion(s: unknown): [number, number, number] | null {
   const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(s));
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
 /** The tag's plain version when it parses and is newer than `current`
  * under numeric three-part comparison, else null. */
-function newerVersion(current, tag) {
+export function newerVersion(current: unknown, tag: unknown): string | null {
   const a = parseVersion(current);
   const b = parseVersion(tag);
   if (!a || !b) return null;
-  for (let i = 0; i < 3; i++) {
-    if (b[i] > a[i]) return b.join('.');
-    if (b[i] < a[i]) return null;
-  }
+  const [a0, a1, a2] = a;
+  const [b0, b1, b2] = b;
+  if (b0 > a0) return b.join('.');
+  if (b0 < a0) return null;
+  if (b1 > a1) return b.join('.');
+  if (b1 < a1) return null;
+  if (b2 > a2) return b.join('.');
   return null;
 }
 
-async function checkForUpdate(fetch, current) {
-  const failed = (reason) => ({ current, ok: false, latest: null, url: null, reason });
-  let body;
+export async function checkForUpdate(fetch: FetchLike, current: string): Promise<UpdateCheck> {
+  const failed = (reason: string): UpdateCheck => ({ current, ok: false, latest: null, url: null, reason });
+  let body: unknown;
   try {
     const res = await fetch(LATEST_URL, {
       headers: { Accept: 'application/vnd.github+json' },
@@ -47,13 +73,11 @@ async function checkForUpdate(fetch, current) {
     if (!res.ok) return failed(`status ${res.status}`);
     body = await res.json();
   } catch (err) {
-    return failed(err && err.message ? err.message : String(err));
+    return failed(messageOf(err));
   }
-  if (!body || typeof body.tag_name !== 'string') return failed('no tag_name in response');
+  if (!hasTagName(body)) return failed('no tag_name in response');
   if (!parseVersion(body.tag_name)) return failed(`tag ${body.tag_name} is not a version`);
   const latest = newerVersion(current, body.tag_name);
   if (!latest) return { current, ok: true, latest: null, url: null, reason: null };
   return { current, ok: true, latest, url: TAG_PAGE + body.tag_name, reason: null };
 }
-
-module.exports = { parseVersion, newerVersion, checkForUpdate, LATEST_URL };

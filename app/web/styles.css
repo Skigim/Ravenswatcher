@@ -166,6 +166,46 @@ body {
 
 .head-right { display: flex; align-items: center; gap: 2px; }
 
+/* The header is the title bar: blank space drags the window, and everything
+   interactive opts back out (a drag region swallows clicks). The scrim is
+   fixed over the whole window while settings is open, so it opts out too, or
+   it would leave the header draggable-but-dead under it. */
+.head { -webkit-app-region: drag; }
+/* The header's controls use `all: unset` further down, which also resets
+   -webkit-app-region, so these selectors must out-rank a single class. */
+.head :is(a, button, [role="tab"], .tab, .gear, .status, .head-right),
+.settings, .settings-scrim, .update-bar { -webkit-app-region: no-drag; }
+
+/* Windows draws native caption buttons in a 16 px strip across the top
+   (titleBarOverlay, TITLE_BAR_HEIGHT in main.ts). The header grows by that
+   strip and pads its content below it, so the header itself looks as it did
+   under the OS frame; the strip drags like the rest of the header. The
+   connection dot moves up into the strip, just left of the caption buttons.
+   env() reports where those buttons start, with a fallback for a runtime
+   that does not expose it. Other platforms keep the OS frame and this layout
+   does not apply. */
+.platform-win32 { --title-h: 16px; }
+.platform-win32 .head {
+  position: relative;
+  height: calc(var(--head-h) + var(--title-h));
+  padding-top: var(--title-h);
+}
+.platform-win32 .head-right {
+  position: absolute;
+  top: 0;
+  height: var(--title-h);
+  right: 138px;
+  right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 6px);
+}
+.platform-win32 .head-right .status { height: var(--title-h); }
+
+/* Unfocused window: mute the header like a native title bar does. */
+.window-inactive .head .wordmark,
+.window-inactive .head .kicker,
+.window-inactive .head .tab,
+.window-inactive .head .gear { opacity: 0.55; }
+.window-inactive .head .brand-rule { opacity: 0.6; }
+
 /* A quiet connection dot. Names and failure details live in its tooltip. */
 .status { display: grid; place-items: center; width: 28px; height: 36px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-600); }
@@ -212,7 +252,7 @@ body {
    element's overflow: hidden. */
 .settings {
   position: fixed;
-  top: calc(var(--head-h) + 2px);
+  top: calc(var(--head-h) + var(--title-h, 0px) + 2px);
   right: var(--pad);
   width: 320px;
   background: var(--surface);
@@ -1045,6 +1085,9 @@ body {
 }
 .tab:hover { color: var(--neutral-100); }
 .tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+/* A tab in the selected state keeps a visible ring when reached by keyboard:
+   the accent fill alone would hide an accent outline. */
+.tab[aria-selected="true"]:focus-visible { outline-color: var(--ground); }
 .tab[aria-selected="true"] {
   background: var(--accent-500);
   border-color: var(--accent-500);
