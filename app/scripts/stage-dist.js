@@ -20,7 +20,9 @@ const WEB_SKIP = new Set(['test']);
 // item tables stay in the repo for UI work and for test-item-tables, and the
 // runtime decodes its own from the player's install (assets/build.ts). The
 // manifest ships; its first two columns are what the runtime build reads.
-const WEB_SKIP_FILE = (rel) => /^assets\/[^/]+\.png$/.test(rel) || rel === 'item-text.js' || rel === 'item-icons.js';
+// tsconfig.json and *.tsbuildinfo drive the renderer build only; the page never reads them.
+const WEB_SKIP_FILE = (rel) => /^assets\/[^/]+\.png$/.test(rel) || rel === 'item-text.js' || rel === 'item-icons.js'
+  || rel === 'tsconfig.json' || rel.endsWith('.tsbuildinfo');
 const NATIVE = ['node_modules/koffi', 'node_modules/@koromix/koffi-win32-x64'];
 const NATIVE_SKIP = new Set(['doc', 'vendor']);
 
