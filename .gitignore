@@ -132,3 +132,14 @@
 /app/main.js
 /app/main.js.map
 /app/main.d.ts
+
+# Renderer (web/tsconfig.json), ported to TypeScript. index.html and share.html
+# load the emitted scripts, so these stay at the same paths.
+/app/web/run-presentation.js
+/app/web/run-presentation.js.map
+/app/web/share.js
+/app/web/share.js.map
+/app/tsconfig.tsbuildinfo
+/app/web/tsconfig.tsbuildinfo
+/app/web/app.js
+/app/web/app.js.map

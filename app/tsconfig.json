@@ -64,11 +64,15 @@
     // shipping the TypeScript too, which is not wanted.
     "declaration": true,
     "sourceMap": true,
+    // web/tsconfig.json references this project to read preload-api's types.
+    // composite writes tsconfig.tsbuildinfo beside this file (git-ignored).
+    "composite": true,
 
     "types": ["node"]
   },
 
   // Only .ts is a compiler input. Unconverted .js is untouched.
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "**/*.d.ts"]
+  // web/ is the renderer and has its own config (web/tsconfig.json).
+  "exclude": ["node_modules", "web", "**/*.d.ts"]
 }

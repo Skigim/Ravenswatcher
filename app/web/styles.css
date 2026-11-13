@@ -190,14 +190,17 @@ body {
   height: calc(var(--head-h) + var(--title-h));
   padding-top: var(--title-h);
 }
+/* Windows draws the caption buttons at their native 32 px height even though
+   the reserved strip is only 16 px, so the dot centres on those buttons, not
+   on the strip. */
 .platform-win32 .head-right {
   position: absolute;
   top: 0;
-  height: var(--title-h);
+  height: 32px;
   right: 138px;
   right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 6px);
 }
-.platform-win32 .head-right .status { height: var(--title-h); }
+.platform-win32 .head-right .status { height: 32px; }
 
 /* Unfocused window: mute the header like a native title bar does. */
 .window-inactive .head .wordmark,

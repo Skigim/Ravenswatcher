@@ -30,6 +30,7 @@ function main() {
     const pngs = web.filter((p) => p.endsWith('.png'));
     assert.strictEqual(pngs.length, 0, `PNG in stage: ${pngs.join(', ')}`);
     assert.ok(!web.includes('web/item-text.js') && !web.includes('web/item-icons.js'), 'generated tables in stage');
+    assert.ok(!web.some((p) => p.endsWith('tsconfig.json') || p.endsWith('.tsbuildinfo')), 'renderer build config in stage');
     assert.ok(web.includes('web/assets/SOURCES.tsv'), 'manifest missing from stage');
     for (const name of ['GermaniaOne-Regular.ttf', 'GermaniaOne-OFL.txt', 'AlegreyaSans-Regular.ttf', 'AlegreyaSans-Bold.ttf', 'AlegreyaSans-OFL.txt']) {
       assert.ok(web.includes('web/assets/fonts/' + name), 'offline font or license missing: ' + name);

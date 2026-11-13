@@ -7,16 +7,94 @@
 
 "use strict";
 
+// Types only, by inline import: this file is a classic script and must not
+// have a top-level import.
+type StateFrame = import("../sidecar-frame").StateFrame;
+type UpdateInfo = import("../preload-api").UpdateInfo;
+type AssetTables = import("../preload-api").AssetTables;
+type HistoryPayload = import("../preload-api").HistoryPayload;
+type HistoryRun = HistoryPayload["runs"][number];
+type HistoryDeletionScope = import("../preload-api").HistoryDeletionScope;
+type ConnectionState = "connected" | "loading" | "waiting" | "stale" | "error";
+
+/** The confirmation flow's state: what prepareHistoryDeletion handed back. */
+interface HistoryDeletionState {
+  scope: HistoryDeletionScope;
+  ids: number[];
+  step: number;
+  steps: number;
+  token?: string;
+}
+
 const DASH = "—";
-const el = (id) => document.getElementById(id);
+
+// A lookup the JS assumes succeeds. A missing element is a broken page, and a
+// clear error at the lookup beats a TypeError somewhere downstream.
+function el(id: string): HTMLElement;
+function el<T extends HTMLElement>(id: string, kind: new () => T): T;
+function el(id: string, kind: new () => HTMLElement = HTMLElement): HTMLElement {
+  const node = document.getElementById(id);
+  if (!(node instanceof kind)) throw new Error(`ravenswatch: #${id} is missing or is not a ${kind.name}`);
+  return node;
+}
+
+// The elements the JS null-checks itself: they may legitimately be absent.
+function elMaybe(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
+
+// querySelector for a child the code that built the row put there.
+function q(root: ParentNode, selector: string): HTMLElement {
+  const node = root.querySelector(selector);
+  if (!(node instanceof HTMLElement)) throw new Error(`ravenswatch: ${selector} is missing`);
+  return node;
+}
+
+// An index the surrounding code has already kept in range.
+function must<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`ravenswatch: ${what} is missing`);
+  return value;
+}
+
+function closestEl(target: EventTarget | null, selector: string): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const hit = target.closest(selector);
+  return hit instanceof HTMLElement ? hit : null;
+}
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+
+function isList(x: unknown): x is unknown[] {
+  return Array.isArray(x);
+}
+
+function isStringMap(x: unknown): x is Record<string, string> {
+  return isRecord(x) && Object.values(x).every(v => typeof v === "string");
+}
+
+function isTalentMap(x: unknown): x is Record<string, Record<string, string>> {
+  return isRecord(x) && Object.values(x).every(isStringMap);
+}
+
+function str(x: unknown): string | null {
+  return typeof x === "string" ? x : null;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return isRecord(error) && typeof error.message === "string" && error.message
+    ? error.message
+    : error instanceof Error && error.message ? error.message : fallback;
+}
 
 // True only under the Electron IPC transport (window.ravenswatch present).
 // Computed once: the preload bridge either exists for the page's whole
 // lifetime or never does.
 const ELECTRON_TRANSPORT = !!(window.ravenswatch && typeof window.ravenswatch.onState === "function");
 
-let coopConsent = null; // null | 'agreed' | 'declined'
-let lastRenderedFrame = null;
+let coopConsent: "agreed" | "declined" | null = null; // null | 'agreed' | 'declined'
+let lastRenderedFrame: StateFrame | null = null;
 
 // Every icon is a name in the app's own vocabulary (map_chest.png,
 // item_dream.png). main.js serves them on asset://icons/ out of a cache it
@@ -24,7 +102,7 @@ let lastRenderedFrame = null;
 // holds reference copies the page never loads.
 const ICON_BASE = "asset://icons/";
 
-function icon(node, name, dim) {
+function icon(node: HTMLElement, name: string | null | undefined, dim?: boolean): void {
   node.style.backgroundImage = name ? `url("${ICON_BASE}${name}")` : "none";
   node.classList.toggle("dim", !!dim);
 }
@@ -37,24 +115,26 @@ function icon(node, name, dim) {
 // tables arrive an offer shows its name alone.
 //
 const itemKey = RunPresentation.itemKey;
-let ITEM_TEXT = {};
-let SHOP_ICONS = {};
-let ITEM_NAMES = {};
-let OBJECT_KEYS = {};
-let OBJECT_RARITIES = {};
-let HERO_ICONS = {};
-let DIFFICULTY_ICONS = {};
-let TALENT_ICONS = {};
+let ITEM_TEXT: Record<string, string> = {};
+let SHOP_ICONS: Record<string, string> = {};
+let ITEM_NAMES: Record<string, string> = {};
+let OBJECT_KEYS: Record<string, string> = {};
+let OBJECT_RARITIES: Record<string, string> = {};
+let HERO_ICONS: Record<string, string> = {};
+let DIFFICULTY_ICONS: Record<string, string> = {};
+let TALENT_ICONS: Record<string, Record<string, string>> = {};
 
-function applyAssets(tables) {
-  ITEM_TEXT = (tables && tables.ITEM_TEXT) || {};
-  SHOP_ICONS = (tables && tables.SHOP_ICONS) || {};
-  ITEM_NAMES = (tables && tables.ITEM_NAMES) || {};
-  OBJECT_KEYS = (tables && tables.OBJECT_KEYS) || {};
-  OBJECT_RARITIES = (tables && tables.OBJECT_RARITIES) || {};
-  HERO_ICONS = (tables && tables.HERO_ICONS) || {};
-  DIFFICULTY_ICONS = (tables && tables.DIFFICULTY_ICONS) || {};
-  TALENT_ICONS = (tables && tables.TALENT_ICONS) || {};
+function applyAssets(tables: AssetTables | null | undefined): void {
+  // The bridge types each table as unknown; the guards keep a malformed one
+  // from reaching the lookups, and fall back to empty as a missing one does.
+  ITEM_TEXT = (tables && isStringMap(tables.ITEM_TEXT) && tables.ITEM_TEXT) || {};
+  SHOP_ICONS = (tables && isStringMap(tables.SHOP_ICONS) && tables.SHOP_ICONS) || {};
+  ITEM_NAMES = (tables && isStringMap(tables.ITEM_NAMES) && tables.ITEM_NAMES) || {};
+  OBJECT_KEYS = (tables && isStringMap(tables.OBJECT_KEYS) && tables.OBJECT_KEYS) || {};
+  OBJECT_RARITIES = (tables && isStringMap(tables.OBJECT_RARITIES) && tables.OBJECT_RARITIES) || {};
+  HERO_ICONS = (tables && isStringMap(tables.HERO_ICONS) && tables.HERO_ICONS) || {};
+  DIFFICULTY_ICONS = (tables && isStringMap(tables.DIFFICULTY_ICONS) && tables.DIFFICULTY_ICONS) || {};
+  TALENT_ICONS = (tables && isTalentMap(tables.TALENT_ICONS) && tables.TALENT_ICONS) || {};
   if (lastRenderedFrame) render(lastRenderedFrame);
   renderHistory();
   refreshTip();
@@ -67,9 +147,9 @@ function applyAssets(tables) {
 // from document because every list here is rebuilt by innerHTML and a
 // listener per row would be lost on the next map.
 const tipEl = el("tip");
-let tipAnchor = null;
+let tipAnchor: HTMLElement | null = null;
 
-function placeTip(target) {
+function placeTip(target: HTMLElement): void {
   const r = target.getBoundingClientRect();
   const w = tipEl.offsetWidth;
   const h = tipEl.offsetHeight;
@@ -86,7 +166,7 @@ function placeTip(target) {
   tipEl.style.top = top + "px";
 }
 
-function showTip(target) {
+function showTip(target: HTMLElement): void {
   tipAnchor = target;
   RunPresentation.setName(el("tip-name"), target.dataset.tipName);
   el("tip-body").textContent = target.dataset.tipBody || "";
@@ -102,7 +182,7 @@ function showTip(target) {
   placeTip(target);
 }
 
-function hideTip() {
+function hideTip(): void {
   tipAnchor = null;
   tipEl.hidden = true;
 }
@@ -111,20 +191,20 @@ function hideTip() {
 // from under the pointer (a new map replaces every tile), or its text may
 // have changed in place (an offer sold while hovered). Re-reading it is
 // cheaper than deciding which happened.
-function refreshTip() {
+function refreshTip(): void {
   if (!tipAnchor) return;
   if (tipAnchor.isConnected && tipAnchor.dataset.tipName) showTip(tipAnchor);
   else hideTip();
 }
 
-function initTip() {
+function initTip(): void {
   document.addEventListener("focusin", e => {
-    const target = e.target.closest ? e.target.closest("[data-tip-name]") : null;
+    const target = closestEl(e.target, "[data-tip-name]");
     if (target) showTip(target);
   });
   document.addEventListener("focusout", () => hideTip());
   document.addEventListener("mouseover", (e) => {
-    const target = e.target.closest ? e.target.closest("[data-tip-name]") : null;
+    const target = closestEl(e.target, "[data-tip-name]");
     if (!target) { if (tipAnchor) hideTip(); return; }
     if (target !== tipAnchor) showTip(target);
   });
@@ -137,7 +217,7 @@ function initTip() {
 
 // Sets or clears the pair in one call. A node with no name shows nothing,
 // which is how a placeholder or an unresolved row opts out.
-function setTip(node, name, body) {
+function setTip(node: HTMLElement, name: string | null | undefined, body?: string | null): void {
   if (!name) {
     delete node.dataset.tipName;
     delete node.dataset.tipBody;
@@ -164,41 +244,41 @@ const TILE_COLS_MIN = 3;
 const TILE_COLS_MAX = 8;
 const TILE_COLS_DEFAULT = 5;
 
-function readPanelLines() {
+function readPanelLines(): boolean {
   try { return localStorage.getItem(PANEL_LINES_KEY) !== "off"; }
   catch { return true; }
 }
 
-function writePanelLines(on) {
+function writePanelLines(on: boolean): void {
   try { localStorage.setItem(PANEL_LINES_KEY, on ? "on" : "off"); }
   catch { /* unavailable: the setting still applies, it just won't persist */ }
 }
 
-function readStylizedFonts() {
+function readStylizedFonts(): boolean {
   try { return localStorage.getItem(STYLIZED_FONTS_KEY) !== "off"; }
   catch { return true; }
 }
-function applyStylizedFonts(on) {
+function applyStylizedFonts(on: boolean): void {
   document.body.classList.toggle("stylized-fonts", on);
 }
-function writeStylizedFonts(on) {
+function writeStylizedFonts(on: boolean): void {
   try { localStorage.setItem(STYLIZED_FONTS_KEY, on ? "on" : "off"); }
   catch { /* unavailable: the current choice still applies */ }
 }
 
-function readDiagBar() {
+function readDiagBar(): boolean {
   try { return localStorage.getItem(DIAG_BAR_KEY) === "on"; }
   catch { return false; }
 }
 
-function writeDiagBar(on) {
+function writeDiagBar(on: boolean): void {
   try { localStorage.setItem(DIAG_BAR_KEY, on ? "on" : "off"); }
   catch { /* unavailable */ }
 }
 
 // Anything that is not an integer in range reads as the default -- a stale
 // key from an older build must never produce a zero-column grid.
-function readTileCols() {
+function readTileCols(): number {
   try {
     const n = Number(localStorage.getItem(TILE_COLS_KEY));
     return Number.isInteger(n) && n >= TILE_COLS_MIN && n <= TILE_COLS_MAX
@@ -206,7 +286,7 @@ function readTileCols() {
   } catch { return TILE_COLS_DEFAULT; }
 }
 
-function writeTileCols(n) {
+function writeTileCols(n: number): void {
   try { localStorage.setItem(TILE_COLS_KEY, String(n)); }
   catch { /* unavailable */ }
 }
@@ -214,21 +294,21 @@ function writeTileCols(n) {
 // The release the player chose to skip. Stored by version so a later
 // release shows the bar again; nothing else touches it.
 const SKIP_VERSION_KEY = "ravenswatch:skip-version";
-function readSkipVersion() {
+function readSkipVersion(): string | null {
   try { return localStorage.getItem(SKIP_VERSION_KEY); }
   catch { return null; }
 }
-function writeSkipVersion(v) {
+function writeSkipVersion(v: string): void {
   try { localStorage.setItem(SKIP_VERSION_KEY, v); }
   catch { /* private mode or blocked storage: the skip lasts this session */ }
 }
 
 // The launch check's one message, and whether "Remind me later" was clicked
 // this session. Both start empty so a page with no transport shows nothing.
-let updateInfo = null;
+let updateInfo: UpdateInfo | null = null;
 let updateDismissed = false;
 
-function showUpdateBar() {
+function showUpdateBar(): void {
   const bar = el("update-bar");
   const latest = updateInfo && updateInfo.latest;
   bar.hidden = !latest || updateDismissed || latest === readSkipVersion();
@@ -236,7 +316,7 @@ function showUpdateBar() {
 
 // Renders the bar and the version row from {current, ok, latest, url}.
 // The row ignores skip and dismiss so the download stays reachable.
-function applyUpdate(info) {
+function applyUpdate(info: UpdateInfo | null | undefined): void {
   updateInfo = info || null;
   const current = info && info.current ? String(info.current) : "";
   const latest = info && info.latest ? String(info.latest) : null;
@@ -244,7 +324,7 @@ function applyUpdate(info) {
 
   el("version-label").textContent = current ? "Version " + current : "Version";
   const note = el("version-note");
-  const rowLink = el("version-download");
+  const rowLink = el("version-download", HTMLAnchorElement);
   if (latest && url) {
     note.textContent = latest + " available";
     rowLink.href = url;
@@ -263,12 +343,12 @@ function applyUpdate(info) {
   }
 
   el("update-text").textContent = latest ? "Ravenswatcher " + latest + " is available." : "";
-  const barLink = el("update-download");
+  const barLink = el("update-download", HTMLAnchorElement);
   if (latest && url) barLink.href = url; else barLink.removeAttribute("href");
   showUpdateBar();
 }
 
-function initUpdateBar() {
+function initUpdateBar(): void {
   el("update-skip").addEventListener("click", () => {
     if (updateInfo && updateInfo.latest) writeSkipVersion(updateInfo.latest);
     showUpdateBar();
@@ -281,30 +361,30 @@ function initUpdateBar() {
 
 // The class carries the whole effect -- see .seamless in styles.css, which
 // repaints each seam to match its neighbours without moving anything.
-function applyPanelLines(on) {
+function applyPanelLines(on: boolean): void {
   document.body.classList.toggle("seamless", !on);
 }
 
-function applyDiagBar(on) {
+function applyDiagBar(on: boolean): void {
   document.body.classList.toggle("no-diag", !on);
 }
 
 // One custom property carries the column count; .tiles-list[data-mode="grid"]
 // derives the track list and the cell edge from it, so a change reflows
 // without a re-render.
-function applyTileCols(n) {
+function applyTileCols(n: number): void {
   el("tiles-list").style.setProperty("--tile-cols", String(n));
 }
 
 // Called at the bottom of this file, which runs from a <script> at the end of
 // <body> -- so the stored setting is on the class list before the first paint
 // and there is no flash of a lined page resolving into an unlined one.
-function initSettings() {
+function initSettings(): void {
   const gear = el("settings-open");
   const panel = el("settings");
   const scrim = el("settings-scrim");
   const toggle = el("panel-lines");
-  const diagToggle = el("diag-bar");
+  const diagToggle = elMaybe("diag-bar");
 
   const fontToggle = el("stylized-fonts");
   let stylized = readStylizedFonts();
@@ -325,21 +405,21 @@ function initSettings() {
   applyDiagBar(diagOn);
   if (diagToggle) diagToggle.setAttribute("aria-checked", String(diagOn));
 
-  const colsInput = el("tile-cols");
+  const colsInput = el("tile-cols", HTMLInputElement);
   const colsValue = el("tile-cols-value");
   let cols = readTileCols();
   applyTileCols(cols);
   colsInput.value = String(cols);
   colsValue.textContent = String(cols);
 
-  function setOpen(open) {
+  function setOpen(open: boolean): void {
     panel.hidden = !open;
     scrim.hidden = !open;
     gear.setAttribute("aria-expanded", String(open));
     if (open) { hideTip(); toggle.focus(); }
   }
 
-  gear.addEventListener("click", () => setOpen(panel.hidden));
+  gear.addEventListener("click", () => setOpen(panel.hidden === true));
   scrim.addEventListener("click", () => setOpen(false));
 
   toggle.addEventListener("click", () => {
@@ -374,13 +454,14 @@ function initSettings() {
   });
 }
 
-function renderConnection(state, detail = "") {
-  const names = { connected: "Connected to Ravenswatch", loading: "Connecting to Ravenswatch",
+function renderConnection(state: ConnectionState, detail = ""): void {
+  const names: Record<ConnectionState, string> = { connected: "Connected to Ravenswatch", loading: "Connecting to Ravenswatch",
     waiting: "Waiting for Ravenswatch", stale: "Connection is not responding", error: "Connection unavailable" };
   const host = el("head-right");
   host.dataset.mode = "live";
   if (!host.firstElementChild) host.innerHTML = '<div class="status"><span class="status-dot" aria-hidden="true"></span></div>';
   const status = host.firstElementChild;
+  if (!(status instanceof HTMLElement)) throw new Error("ravenswatch: #head-right has no status element");
   status.className = state === "connected" ? "status status-live" : "status";
   status.dataset.connection = state;
   status.tabIndex = 0;
@@ -390,7 +471,7 @@ function renderConnection(state, detail = "") {
   if (tipAnchor === status) refreshTip();
 }
 
-function renderHead(s) {
+function renderHead(s: StateFrame): void {
   // Resolved values distinguish a connected reader from one still loading.
   renderConnection(s.found > 0 ? "connected" : "loading");
 }
@@ -404,11 +485,11 @@ function renderHead(s) {
 // drop happened, so a pulse left running would have the player waiting on a
 // teleport that already came back. Silence is the honest failure here, which
 // is why this does not follow markStale()'s keep-the-last-frame rule.
-function setCombatEdge(on) {
+function setCombatEdge(on: boolean): void {
   document.body.classList.toggle("in-combat", !!on);
 }
 
-function renderKpis(s) {
+function renderKpis(s: StateFrame): void {
   // Hero level and the map name are not drawn: the game already shows both.
   // The reader still sends map_name, which the loading curtain uses.
   //
@@ -423,11 +504,11 @@ function renderKpis(s) {
 }
 
 /** The name the reader read, or a dash. Never a guess. */
-function shopIconFor(name) {
+function shopIconFor(name: string | null | undefined): string {
   return (name && SHOP_ICONS[itemKey(name)]) || "icon_question.png";
 }
 
-function makeShopRow() {
+function makeShopRow(): HTMLElement {
   const row = document.createElement("div");
   row.className = "shop-row";
   row.innerHTML =
@@ -440,7 +521,7 @@ function makeShopRow() {
 
 // One list-fills-the-column state, used for every case that has no offers to
 // draw. `mode` keeps it from being rebuilt on every 250 ms poll.
-function shopPlaceholder(mode, mark, label, note, fault) {
+function shopPlaceholder(mode: string, mark: string, label: string, note?: string, fault?: boolean): void {
   const host = el("shop-list");
   if (host.dataset.mode === mode) return;
   host.dataset.mode = mode;
@@ -467,7 +548,7 @@ function shopPlaceholder(mode, mark, label, note, fault) {
   host.append(row);
 }
 
-function renderShop(s) {
+function renderShop(s: StateFrame): void {
   // The balance is a plain GlobalValue and does not need the shop, so it is
   // painted in every state including the ones with no offers.
   const shards = s.dream_shards;
@@ -508,10 +589,11 @@ function renderShop(s) {
   }
 
   offers.forEach((offer, i) => {
-    const row = host.children[i];
-    icon(row.querySelector(".shop-icon"), shopIconFor(offer.name));
+    const row = must(host.children[i], "shop row");
+    if (!(row instanceof HTMLElement)) throw new Error("ravenswatch: shop row is not an element");
+    icon(q(row, ".shop-icon"), shopIconFor(offer.name));
 
-    const name = row.querySelector(".shop-name");
+    const name = q(row, ".shop-name");
     name.textContent = offer.name || DASH;
     name.classList.toggle("unresolved", !offer.name);
 
@@ -522,8 +604,8 @@ function renderShop(s) {
     setTip(row, offer.name,
       offer.purchased ? ["Sold", text].filter(Boolean).join("\n") : text);
 
-    const price = row.querySelector(".shop-price-value");
-    const shard = row.querySelector(".shards");
+    const price = q(row, ".shop-price-value");
+    const shard = q(row, ".shards");
 
     if (offer.purchased) {
       price.textContent = "SOLD";
@@ -549,7 +631,7 @@ function renderShop(s) {
 // live in the tooltip; at this width they would crowd the name. The icon sits
 // where every other KPI cell puts one, so it costs no height, and it is how a
 // melody is recognised at a glance.
-function makeMelodyCard() {
+function makeMelodyCard(): HTMLElement {
   const card = document.createElement("div");
   card.className = "kpi melody-card";
   card.innerHTML =
@@ -559,12 +641,12 @@ function makeMelodyCard() {
   return card;
 }
 
-function renderMelodies(s) {
+function renderMelodies(s: StateFrame): void {
   const host = el("melody-cards");
   // Already held: sweeper.js keeps the last resolved payload across a sweep
   // that read nothing and clears it when the run ends, so a null here means
   // the channel genuinely has nothing to show.
-  const slots = (s.melodies && Array.isArray(s.melodies)) ? s.melodies : null;
+  const slots = Array.isArray(s.melodies) ? s.melodies : null;
 
   if (!slots) {
     // Empty cards rather than a placard. These cells are part of a four-across
@@ -576,9 +658,9 @@ function renderMelodies(s) {
       for (let i = 0; i < 3; i++) {
         const card = makeMelodyCard();
         card.classList.add("melody-card-waiting");
-        card.querySelector(".melody-state").textContent = "";
-        icon(card.querySelector(".melody-icon"), "UI_Melody_Icon_Locked.png", true);
-        const name = card.querySelector(".melody-name");
+        q(card, ".melody-state").textContent = "";
+        icon(q(card, ".melody-icon"), "UI_Melody_Icon_Locked.png", true);
+        const name = q(card, ".melody-name");
         name.textContent = "Loading…";
         name.classList.add("unresolved");
         host.append(card);
@@ -594,22 +676,23 @@ function renderMelodies(s) {
   }
 
   slots.forEach((m, i) => {
-    const card = host.children[i];
+    const card = must(host.children[i], "melody card");
+    if (!(card instanceof HTMLElement)) throw new Error("ravenswatch: melody card is not an element");
     const isLocked = m.state === "locked";
     const isUnresolved = m.state === null || m.state === undefined;
 
-    const badge = card.querySelector(".melody-state");
+    const badge = q(card, ".melody-state");
     badge.textContent = isUnresolved ? DASH : m.state;
     badge.className = "badge melody-state"
       + (isUnresolved ? " dim unresolved melody-state-unresolved" : ` melody-state-${m.state}`);
 
-    const name = card.querySelector(".melody-name");
+    const name = q(card, ".melody-name");
     name.textContent = m.name;
     name.classList.toggle("unresolved", isLocked || isUnresolved);
 
     // A locked slot draws the padlock art rather than the melody's own, which
     // is the same thing the game does and is why that texture ships.
-    icon(card.querySelector(".melody-icon"),
+    icon(q(card, ".melody-icon"),
       (isLocked || isUnresolved) ? "UI_Melody_Icon_Locked.png" : m.icon,
       isLocked || isUnresolved);
 
@@ -624,7 +707,7 @@ function renderMelodies(s) {
   });
 }
 
-function makeTileCell() {
+function makeTileCell(): HTMLElement {
   const cell = document.createElement("div");
   cell.className = "tile-cell";
   // The ring first, so it sits behind. It is an alpha silhouette used as a
@@ -647,10 +730,10 @@ function makeTileCell() {
 // is the whole reset rule: a new map starts clean, and a restart of the app
 // forgets. It is clamped to the live count at paint time, so a placement
 // that appears mid-map brings the tile back with the difference showing.
-function initTileDone() {
+function initTileDone(): void {
   const host = el("tiles-list");
-  const adjust = (e, delta) => {
-    const cell = e.target.closest ? e.target.closest(".tile-cell") : null;
+  const adjust = (e: MouseEvent, delta: number): void => {
+    const cell = closestEl(e.target, ".tile-cell");
     if (!cell) return;
     const count = Number(cell.dataset.count) || 0;
     const done = Math.min(Number(cell.dataset.done) || 0, count);
@@ -670,9 +753,9 @@ function initTileDone() {
 // state.ts decides which tiles survive and which icon each gets; this walks
 // a display-ready list. The count draws only above one, so the common case is
 // a bare icon.
-function renderTiles(s) {
+function renderTiles(s: StateFrame): void {
   const host = el("tiles-list");
-  const cells = (s.tiles && Array.isArray(s.tiles)) ? s.tiles : null;
+  const cells = Array.isArray(s.tiles) ? s.tiles : null;
 
   // null and [] are different answers and must not look alike. null is the
   // roster not read yet -- it costs most of a second on map load, so this is
@@ -701,7 +784,7 @@ function renderTiles(s) {
   // frame either way, so a reward opening mid-run updates without a rebuild.
   // The map id is part of the key so that two maps with the same roster in
   // the same order do not share their done marks.
-  const shape = s.map_id + "|" + cells.map(c => c.icon).join("|");
+  const shape = `${s.map_id}|${cells.map(c => c.icon).join("|")}`;
   if (host.dataset.shape !== shape) {
     host.dataset.mode = "grid";
     host.dataset.shape = shape;
@@ -710,13 +793,14 @@ function renderTiles(s) {
   }
 
   cells.forEach((c, i) => {
-    const cell = host.children[i];
-    icon(cell.querySelector(".tile-art"), c.icon);
+    const cell = must(host.children[i], "tile cell");
+    if (!(cell instanceof HTMLElement)) throw new Error("ravenswatch: tile cell is not an element");
+    icon(q(cell, ".tile-art"), c.icon);
 
     // Tier is the game's own encoding: the ring behind the icon, green,
     // yellow or red for 1, 2 and 3. Things with no tier ship no ring, and
     // drawing one anyway would invent a distinction the game does not make.
-    const ring = cell.querySelector(".tile-ring");
+    const ring = q(cell, ".tile-ring");
     ring.hidden = !c.outline;
     if (c.outline) {
       const url = `url("${ICON_BASE}${c.outline}")`;
@@ -733,7 +817,7 @@ function renderTiles(s) {
 
     // A count of one would sit on almost every icon and bury the few that
     // are really doubled.
-    cell.querySelector(".tile-count").textContent = left > 1 ? "×" + left : "";
+    q(cell, ".tile-count").textContent = left > 1 ? "×" + left : "";
 
     // Not painted -- the panel is icons only. The tooltip says it on hover;
     // the aria-label is what a screen reader gets instead of an unlabelled
@@ -747,7 +831,7 @@ function renderTiles(s) {
   });
 }
 
-function renderDiag(s) {
+function renderDiag(s: StateFrame): void {
   const bits = [s.process];
   if (s.pid) bits.push(`pid ${s.pid}`);
   if (s.base) bits.push(`base 0x${s.base.toString(16).toUpperCase().padStart(16, "0")}`);
@@ -760,7 +844,7 @@ function renderDiag(s) {
   el("diag").textContent = bits.join(" · ");
 }
 
-function ensureCurtain(headline, subline) {
+function ensureCurtain(headline: string, subline?: string): void {
   let br = document.getElementById("between-runs");
   if (!br) {
     br = document.createElement("div");
@@ -768,37 +852,37 @@ function ensureCurtain(headline, subline) {
     br.className = "curtain between-runs";
     br.innerHTML = '<div class="curtain-headline between-runs-message"></div>'
       + '<div class="curtain-sub" hidden></div>';
-    document.querySelector(".shell").insertBefore(br, document.querySelector(".body + .rule"));
+    must(document.querySelector(".shell"), ".shell").insertBefore(br, document.querySelector(".body + .rule"));
   }
-  br.querySelector(".curtain-headline").textContent = headline || "";
-  const sub = br.querySelector(".curtain-sub");
+  q(br, ".curtain-headline").textContent = headline || "";
+  const sub = q(br, ".curtain-sub");
   sub.textContent = subline || "";
   sub.hidden = !subline;
 }
 
-function showCoopDialog() {
-  const dialog = el("coop-dialog");
-  const scrim = el("coop-scrim");
+function showCoopDialog(): void {
+  const dialog = elMaybe("coop-dialog");
+  const scrim = elMaybe("coop-scrim");
   if (dialog && dialog.hidden) {
     hideTip();
     dialog.hidden = false;
     if (scrim) scrim.hidden = false;
-    const agree = el("coop-agree");
+    const agree = elMaybe("coop-agree");
     if (agree) agree.focus();
   }
 }
 
-function hideCoopDialog() {
-  const dialog = el("coop-dialog");
-  const scrim = el("coop-scrim");
+function hideCoopDialog(): void {
+  const dialog = elMaybe("coop-dialog");
+  const scrim = elMaybe("coop-scrim");
   if (dialog) dialog.hidden = true;
   if (scrim) scrim.hidden = true;
 }
 
-function initCoopConsent() {
-  const agree = el("coop-agree");
-  const decline = el("coop-decline");
-  const scrim = el("coop-scrim");
+function initCoopConsent(): void {
+  const agree = elMaybe("coop-agree");
+  const decline = elMaybe("coop-decline");
+  const scrim = elMaybe("coop-scrim");
 
   if (agree) {
     agree.addEventListener("click", () => {
@@ -823,15 +907,15 @@ function initCoopConsent() {
   }
 }
 
-function render(s) {
+function render(s: StateFrame): void {
   // Only a confirmed run boundary changes the view. Missing readings and
   // chapter changes must not interrupt someone browsing History mid-run.
-  if (Number.isInteger(s.pid) && s.pid > 0) {
+  if (s.pid !== null && Number.isInteger(s.pid) && s.pid > 0) {
     if (lastRunPid !== null && lastRunPid !== s.pid) activeRunSeen = false;
     lastRunPid = s.pid;
   }
   if (s.no_run === true || s.map_id === -1) activeRunSeen = false;
-  else if (Number.isInteger(s.map_id) && s.map_id >= 0) {
+  else if (s.map_id !== null && Number.isInteger(s.map_id) && s.map_id >= 0) {
     if (!activeRunSeen) setView("live");
     activeRunSeen = true;
   }
@@ -903,14 +987,14 @@ function render(s) {
 // Keep the last good frame up; only the status pill changes. A page that
 // blanked here would read as the run ending rather than the source going
 // quiet. An `{"error": ...}` frame pushed over IPC lands here.
-function markStale() {
+function markStale(): void {
   setCombatEdge(false);
   renderConnection("stale", "Waiting for the next update.");
 }
 
-function formatSidecarMessage(msg) {
+function formatSidecarMessage(msg: string | null | undefined): string {
   if (!msg || typeof msg !== "string") return "Waiting for Ravenswatch to start";
-  let clean = msg.trim().split("\n")[0].replace(/^Error:\s*/i, "");
+  let clean = (msg.trim().split("\n")[0] ?? "").replace(/^Error:\s*/i, "");
   if (/is not running/i.test(clean)) {
     return "Ravenswatch is not running — start the game to connect";
   }
@@ -933,7 +1017,7 @@ function formatSidecarMessage(msg) {
 // tile individually reads as a broken dashboard, and the tiles are hidden
 // anyway. One headline, with the brand, status pill and gear still visible
 // -- so this is a normal page state, not a dialog.
-function renderSidecarDown(message) {
+function renderSidecarDown(message: string): void {
   setCombatEdge(false);
   hideCoopDialog();
   renderConnection("waiting", formatSidecarMessage(message));
@@ -955,7 +1039,7 @@ function renderSidecarDown(message) {
 // in the diagnostics-only footer line, console.error, and dataset.transport = "none"
 // for DOM probes. Neither the headline nor the subtitle exists in index.html,
 // so seeing them on screen is proof that this fault handler ran.
-function renderNoTransport() {
+function renderNoTransport(): void {
   setCombatEdge(false);
   hideCoopDialog();
 
@@ -984,25 +1068,28 @@ function renderNoTransport() {
 // names); everything below turns them into words at display time, so a
 // wording change never needs the file rewritten.
 
-let historyRuns = [];
+let historyRuns: HistoryRun[] = [];
 let selectingHistory = false;
-const selectedHistory = new Set();
-let historyDelete = null;
+const selectedHistory = new Set<number>();
+let historyDelete: HistoryDeletionState | null = null;
 let historyDeleteBusy = false;
-let historyDeleteFocus = null;
+let historyDeleteFocus: HTMLElement | null = null;
 let historySkipped = 0;
-let view = "history";
+let view: "history" | "live" = "history";
 let activeRunSeen = false;
-let lastRunPid = null;
-const expandedRuns = new Set();
-const runDetailTabs = new Map();
+let lastRunPid: number | null = null;
+const expandedRuns = new Set<number>();
+const runDetailTabs = new Map<number, string>();
 
-const DIFFICULTY_NAMES = { 0: "Adventure", 1: "Twilight", 2: "Darkness", 3: "Nightmare" };
+const DIFFICULTY_NAMES: Record<number, string> = { 0: "Adventure", 1: "Twilight", 2: "Darkness", 3: "Nightmare" };
 const CHAPTER_ROMAN = ["I", "II", "III"];
-const RARITY_CLASS = { 0: "common", 1: "rare", 2: "epic", 3: "legendary", 4: "ultimate" };
+const RARITY_CLASS: Record<number, string> = { 0: "common", 1: "rare", 2: "epic", 3: "legendary", 4: "ultimate" };
+
+type StatRows = ReadonlyArray<readonly [string, string]>;
+type StatGroup = readonly [string, string, StatRows];
 
 // Statistics rows in the game's order and the game's words.
-const RUN_STAT_GROUPS = [
+const RUN_STAT_GROUPS: readonly [StatGroup, StatGroup, StatGroup, StatGroup] = [
   ["Damage", "damage", [
     ["total", "Damage dealt"], ["dash", "From dash"], ["trait", "From trait"],
     ["attack", "From attack"], ["power", "From power"], ["special", "From special"],
@@ -1030,15 +1117,26 @@ const RUN_STAT_GROUPS = [
 const HERO_NAMES = { Red: "Scarlet" };
 
 /** Heroes\Juliet_Update6.herodef.ot -> "Juliet"; falls back to the skin name. */
-function heroCodeForRun(run) { return RunPresentation.heroCode(run); }
-function heroName(run) { return RunPresentation.heroName(run); }
+function heroCodeForRun(run: HistoryRun): string { return RunPresentation.heroCode({ hero_definition: run.hero_definition, hero: run.hero }); }
+function heroName(run: HistoryRun): string { return RunPresentation.heroName({ hero_definition: run.hero_definition, hero: run.hero }); }
 
-function difficultyName(d) {
+function difficultyName(d: unknown): string {
   if (typeof d !== "number") return DASH;
   return DIFFICULTY_NAMES[d] || `Difficulty ${d}`;
 }
 
-function formatPlaytime(seconds) {
+// The art for a stored difficulty; undefined when it is not a number or the
+// table does not know it.
+function difficultyIcon(d: unknown): string | undefined {
+  return typeof d === "number" ? DIFFICULTY_ICONS[d] : undefined;
+}
+
+// The talent-rarity class name for a stored rarity code.
+function rarityName(code: unknown): string | undefined {
+  return typeof code === "number" ? RARITY_CLASS[code] : undefined;
+}
+
+function formatPlaytime(seconds: unknown): string {
   if (typeof seconds !== "number" || !(seconds >= 0)) return DASH;
   const total = Math.floor(seconds);
   const h = Math.floor(total / 3600);
@@ -1047,8 +1145,10 @@ function formatPlaytime(seconds) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-function formatWhen(iso) {
-  const d = new Date(iso);
+function formatWhen(iso: unknown): string {
+  // new Date() reads null as the epoch and anything else that is not a string
+  // or a number as junk; the explicit branches keep both.
+  const d = new Date(typeof iso === "string" || typeof iso === "number" ? iso : iso === null ? 0 : NaN);
   if (Number.isNaN(d.getTime())) return DASH;
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -1056,30 +1156,36 @@ function formatWhen(iso) {
 }
 
 // The statistics page rounds down: 61.73 shows as 61.
-function formatStat(v) {
+function formatStat(v: unknown): string {
   return typeof v === "number" && Number.isFinite(v) ? Math.floor(v).toLocaleString("en-US") : DASH;
 }
 
-function where(run) {
-  const bits = [];
+function where(run: HistoryRun): string {
+  const bits: string[] = [];
   if (run.map_name) bits.push(RunPresentation.stageName(run.map_name));
-  if (typeof run.chapter === "number" && CHAPTER_ROMAN[run.chapter]) bits.push(`Chapter ${CHAPTER_ROMAN[run.chapter]}`);
+  const roman = typeof run.chapter === "number" ? CHAPTER_ROMAN[run.chapter] : undefined;
+  if (roman) bits.push(`Chapter ${roman}`);
   return bits.join(" · ");
 }
 
-function make(tag, className, text) {
+function make<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
 }
 
-function rarityClass(t) {
-  return `talent-${RARITY_CLASS[t.rarity_code] || "unknown"}`;
+function rarityClass(t: Record<string, unknown>): string {
+  return `talent-${rarityName(t.rarity_code) || "unknown"}`;
 }
 
-function talentArt(t, run) {
-  const asset = (TALENT_ICONS[heroCodeForRun(run)] || {})[t.key];
+function talentIconFor(t: Record<string, unknown>, run: HistoryRun): string | undefined {
+  const key = str(t.key);
+  return key === null ? undefined : TALENT_ICONS[heroCodeForRun(run)]?.[key];
+}
+
+function talentArt(t: Record<string, unknown>, run: HistoryRun): HTMLElement | null {
+  const asset = talentIconFor(t, run);
   if (!asset) return null;
   const art = make("span", "talent-icon");
   art.setAttribute("aria-hidden", "true");
@@ -1089,32 +1195,33 @@ function talentArt(t, run) {
 
 // The game has already resolved placeholders, percentages and current damage.
 // Remove only paired game markup; textContent keeps stored text inert.
-function cleanGameDescription(text) {
-  return String(text || "").replace(/#([^@]*)@/g, (_, value) => value.replace(/#/g, "").trim()).replace(/&([^~]*)~/g, "$1").replace(/\$([^*]*)\*/g, "$1").trim();
+function cleanGameDescription(text: unknown): string {
+  return String(text || "").replace(/#([^@]*)@/g, (_: string, value: string) => value.replace(/#/g, "").trim()).replace(/&([^~]*)~/g, "$1").replace(/\$([^*]*)\*/g, "$1").trim();
 }
 
-function talentChip(t, run, focusable = false) {
-  const chip = make("span", t ? `talent ${rarityClass(t)}` : "talent-slot-empty");
+function talentChip(t: unknown, run: HistoryRun, focusable = false): HTMLElement {
+  const talent = isRecord(t) ? t : null;
+  const chip = make("span", talent ? `talent ${rarityClass(talent)}` : "talent-slot-empty");
   chip.classList.add("talent-slot");
-  if (!t) {
+  if (!talent) {
     chip.setAttribute("aria-hidden", "true");
     return chip;
   }
-  const art = talentArt(t, run) || make("span", "talent-icon");
+  const art = talentArt(talent, run) || make("span", "talent-icon");
   if (!art.style.backgroundImage) icon(art, "icon_question.png");
   chip.append(art);
-  chip.setAttribute("aria-label", [t.name, t.rarity].filter(Boolean).join(" · "));
-  const description = cleanGameDescription(t.description);
-  setTip(chip, t.name, description || "Effect description wasn't recorded for this run.");
+  chip.setAttribute("aria-label", [talent.name, talent.rarity].filter(Boolean).join(" · "));
+  const description = cleanGameDescription(talent.description);
+  setTip(chip, str(talent.name), description || "Effect description wasn't recorded for this run.");
   chip.dataset.tipKind = "talent";
-  chip.dataset.tipIcon = (TALENT_ICONS[heroCodeForRun(run)] || {})[t.key] || "icon_question.png";
-  chip.dataset.tipMeta = t.rarity || "";
-  chip.dataset.tipRarity = RARITY_CLASS[t.rarity_code] || "unknown";
+  chip.dataset.tipIcon = talentIconFor(talent, run) || "icon_question.png";
+  chip.dataset.tipMeta = str(talent.rarity) || "";
+  chip.dataset.tipRarity = rarityName(talent.rarity_code) || "unknown";
   if (focusable) chip.tabIndex = 0;
   return chip;
 }
 
-function runCard(run) {
+function runCard(run: HistoryRun): HTMLElement {
   const victory = run.result === "victory";
   const open = expandedRuns.has(run.id);
   const article = make("article", `run ${victory ? "run-victory" : "run-defeat"}`);
@@ -1146,23 +1253,24 @@ function runCard(run) {
   const difficulty = make("div", "run-difficulty");
   const difficultyArt = make("span", "run-difficulty-icon");
   difficultyArt.setAttribute("aria-hidden", "true");
-  icon(difficultyArt, DIFFICULTY_ICONS[run.difficulty] || "icon_question.png");
+  icon(difficultyArt, difficultyIcon(run.difficulty) || "icon_question.png");
   difficulty.append(difficultyArt);
   difficulty.setAttribute("aria-label", difficultyName(run.difficulty));
   setTip(difficulty, difficultyName(run.difficulty), "Difficulty");
 
   const score = make("div", "run-score");
-  const scoreValue = run.score && typeof run.score.total === "number"
-    ? run.score.total.toLocaleString("en-US") : DASH;
+  const runScore = isRecord(run.score) ? run.score : null;
+  const scoreValue = runScore && typeof runScore.total === "number"
+    ? runScore.total.toLocaleString("en-US") : DASH;
   score.append(make("div", "run-score-value", scoreValue));
   setTip(score, "Score", scoreValue === DASH ? "Score wasn't recorded for this run." : scoreValue);
 
   const talents = make("div", "run-talents");
-  const selected = Array.isArray(run.talents) ? run.talents : [];
+  const selected = isList(run.talents) ? run.talents : [];
   talents.setAttribute("aria-label", "Talents");
   for (let i = 0; i < 10; i++) talents.append(talentChip(selected[i], run));
   if (!selected.length) setTip(talents, "Talents",
-    Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run.");
+    isList(run.talents) ? "No talents taken." : "Talents weren't recorded for this run.");
   card.setAttribute("aria-label", [victory ? "Victory" : "Defeat", name,
     difficultyName(run.difficulty), level, `Score ${scoreValue}`, formatPlaytime(run.playtime_s)].filter(Boolean).join(" · "));
 
@@ -1202,7 +1310,7 @@ function runCard(run) {
   return article;
 }
 
-function statBlock(title, rows) {
+function statBlock(title: string, rows: ReadonlyArray<readonly [string, string]>): HTMLElement {
   const block = make("div", "run-block");
   if (title) block.append(make("div", "kicker", title));
   const list = make("dl", "run-rows");
@@ -1215,24 +1323,27 @@ function statBlock(title, rows) {
   return block;
 }
 
-function runObjects(run) {
+function runObjects(run: HistoryRun): HTMLElement {
   const block = make("div", "run-block run-objects-block");
   block.append(make("div", "kicker", "Magical objects"));
-  if (!Array.isArray(run.objects) || !run.objects.length) {
-    block.append(make("div", "run-none", Array.isArray(run.objects)
+  const objects = isList(run.objects) ? run.objects : null;
+  if (!objects || !objects.length) {
+    block.append(make("div", "run-none", objects
       ? "No magical objects." : "Objects weren't recorded for this run."));
     return block;
   }
-  const counts = Array.isArray(run.object_counts) && run.object_counts.length === run.objects.length
+  const counts = isList(run.object_counts) && run.object_counts.length === objects.length
     ? run.object_counts : null;
-  const rarityClasses = { Common: "common", Rare: "rare", Epic: "epic", Legendary: "legendary", Cursed: "cursed" };
+  const rarityClasses: Record<string, string> = { Common: "common", Rare: "rare", Epic: "epic", Legendary: "legendary", Cursed: "cursed" };
   const list = make("ul", "run-objects");
-  run.objects.forEach((guid, i) => {
+  objects.forEach((guid, i) => {
     const key = typeof guid === "string" ? OBJECT_KEYS[guid] : null;
     const name = key && ITEM_NAMES[key];
-    const rarity = OBJECT_RARITIES[guid];
-    const count = counts && Number.isInteger(counts[i]) && counts[i] >= 0 && counts[i] <= 65535 ? counts[i] : null;
-    const row = make("li", `run-object object-${rarityClasses[rarity] || "unknown"}`);
+    const rarity = typeof guid === "string" ? OBJECT_RARITIES[guid] : undefined;
+    const stored = counts ? counts[i] : undefined;
+    const count = typeof stored === "number" && Number.isInteger(stored) && stored >= 0 && stored <= 65535 ? stored : null;
+    const rarityKind = rarity === undefined ? undefined : rarityClasses[rarity];
+    const row = make("li", `run-object object-${rarityKind || "unknown"}`);
     row.tabIndex = 0;
     row.setAttribute("aria-label", `${name || "Unknown object"}, ${count === null ? "quantity unavailable" : `quantity ${count}`}`);
     const frame = make("div", "run-object-frame");
@@ -1256,10 +1367,10 @@ function runObjects(run) {
   return block;
 }
 
-function runMelodies(run) {
+function runMelodies(run: HistoryRun): HTMLElement {
   const block = make("div", "run-block run-melodies-block");
   block.append(make("div", "kicker", "Melodies"));
-  if (!Array.isArray(run.melodies)) {
+  if (!isList(run.melodies)) {
     block.append(make("div", "run-none", "Melodies weren't recorded for this run."));
     return block;
   }
@@ -1269,27 +1380,31 @@ function runMelodies(run) {
   }
   const list = make("ul", "run-melodies");
   for (const m of run.melodies) {
-    const state = ["locked", "active", "completed"].includes(m.state) ? m.state : null;
+    if (!isRecord(m)) continue;
+    const state = m.state === "locked" || m.state === "active" || m.state === "completed" ? m.state : null;
     const row = make("li", `run-melody melody-${state || "unknown"}`);
     row.tabIndex = 0;
-    const required = Number.isInteger(m.notes) && m.notes > 0 ? m.notes : null;
-    const earned = Number.isInteger(m.notes_earned) && m.notes_earned >= 0 && required !== null && m.notes_earned <= required ? m.notes_earned : null;
+    const required = typeof m.notes === "number" && Number.isInteger(m.notes) && m.notes > 0 ? m.notes : null;
+    const earned = typeof m.notes_earned === "number" && Number.isInteger(m.notes_earned) && m.notes_earned >= 0 && required !== null && m.notes_earned <= required ? m.notes_earned : null;
     const progress = state === "active" ? `${earned === null ? DASH : earned}/${required === null ? DASH : required} notes` : state === "completed" ? "Completed" : null;
     row.setAttribute("aria-label", `${m.name}, ${progress || state || "state unavailable"}`);
     const art = make("div", "run-object-icon");
     art.setAttribute("aria-hidden", "true");
     const unavailable = state === "locked" || !state;
-    icon(art, unavailable ? "UI_Melody_Icon_Locked.png" : m.icon, unavailable);
+    icon(art, unavailable ? "UI_Melody_Icon_Locked.png" : str(m.icon), unavailable);
     row.append(art);
     if (progress) row.append(make("span", "run-melody-progress", progress));
-    setTip(row, m.name, [progress || state || "State wasn't recorded.", m.effect].filter(Boolean).join("\n"));
+    setTip(row, str(m.name), [progress || state || "State wasn't recorded.", m.effect].filter(Boolean).join("\n"));
     list.append(row);
   }
   block.append(list);
   return block;
 }
 
-function runHeroDetails(run) {
+const HERO_ATTRIBUTES: ReadonlyArray<readonly [string, string]> = [["Vitality", "vitality"], ["Damage", "damage"], ["Armor", "armor"],
+  ["Critical chance", "crit_chance"], ["Critical damage", "crit_damage"]];
+
+function runHeroDetails(run: HistoryRun): HTMLElement {
   const pane = make("div", "run-hero-details");
   const overview = make("div", "run-hero-overview");
   const portrait = make("div", "run-detail-portrait");
@@ -1303,11 +1418,11 @@ function runHeroDetails(run) {
   ]));
   const attributes = make("div", "run-block run-attributes");
   attributes.append(make("div", "kicker", "Hero attributes"));
-  if (run.hero_stats && typeof run.hero_stats === "object") {
+  if (isRecord(run.hero_stats)) {
+    const heroStats = run.hero_stats;
     const stats = make("ul", "run-attribute-stats");
-    for (const [label, key] of [["Vitality", "vitality"], ["Damage", "damage"], ["Armor", "armor"],
-      ["Critical chance", "crit_chance"], ["Critical damage", "crit_damage"]]) {
-      const value = formatStat(run.hero_stats[key]);
+    for (const [label, key] of HERO_ATTRIBUTES) {
+      const value = formatStat(heroStats[key]);
       const stat = make("li", "run-attribute");
       stat.tabIndex = 0;
       stat.setAttribute("aria-label", `${label}: ${value}`);
@@ -1323,17 +1438,17 @@ function runHeroDetails(run) {
   const talents = make("div", "run-block run-detail-talents");
   talents.append(make("div", "kicker", "Talents"));
   const list = make("div", "run-talent-build");
-  const selected = Array.isArray(run.talents) ? run.talents : [];
+  const selected = isList(run.talents) ? run.talents : [];
   for (let i = 0; i < 10; i++) list.append(talentChip(selected[i], run, true));
   talents.append(list);
-  if (!selected.length) talents.append(make("div", "run-none", Array.isArray(run.talents) ? "No talents taken." : "Talents weren't recorded for this run."));
+  if (!selected.length) talents.append(make("div", "run-none", isList(run.talents) ? "No talents taken." : "Talents weren't recorded for this run."));
   pane.append(overview, attributes, talents);
   return pane;
 }
 
 // These entries match the game's score page art. The Blood Ritual icon is
 // still named KeyKeeper in the resources (crossed swords in the score page).
-const SCORE_ACTIVITY_ICONS = {
+const SCORE_ACTIVITY_ICONS: Record<string, string> = {
   "victory": "score_victory.png", "multiplayer": "score_multiplayer.png",
   "grimoire": "score_grimoire.png", "side quest": "score_mission.png",
   "cursed room": "score_cursed_room.png", "leprechaun's cauldron": "score_cauldron.png",
@@ -1341,20 +1456,21 @@ const SCORE_ACTIVITY_ICONS = {
   "wishing well": "map_wishing_well.png", "stingy jack": "score_stingy_jack.png",
   "optional boss": "score_boss.png", "early awakening of the boss": "score_early_boss.png",
 };
-function scoreIconForLine(line, run) {
-  const label = line.split(":", 1)[0].trim().toLowerCase().replace(/’/g, "'").replace(/\s+/g, " ");
-  if (label === "base score") return DIFFICULTY_ICONS[run.difficulty] || "icon_question.png";
+function scoreIconForLine(line: string, run: HistoryRun): string {
+  const label = (line.split(":", 1)[0] ?? "").trim().toLowerCase().replace(/’/g, "'").replace(/\s+/g, " ");
+  if (label === "base score") return difficultyIcon(run.difficulty) || "icon_question.png";
   if (label === "level") return "score_level.png";
   return SCORE_ACTIVITY_ICONS[label] || "icon_question.png";
 }
 
-function runScoreDetails(run) {
+function runScoreDetails(run: HistoryRun): HTMLElement {
   const block = make("div", "run-block run-score-details");
-  const total = run.score && typeof run.score.total === "number" ? run.score.total.toLocaleString("en-US") : DASH;
+  const runScore = isRecord(run.score) ? run.score : null;
+  const total = runScore && typeof runScore.total === "number" ? runScore.total.toLocaleString("en-US") : DASH;
   block.append(make("div", "kicker", "Score"), make("div", "run-detail-total", total));
-  if (run.score && Array.isArray(run.score.details)) {
+  if (runScore && isList(runScore.details)) {
     const list = make("ul", "run-score-icons");
-    for (const saved of run.score.details) {
+    for (const saved of runScore.details) {
       const line = String(saved);
       const entry = make("li", "run-score-entry");
       entry.tabIndex = 0;
@@ -1371,9 +1487,9 @@ function runScoreDetails(run) {
   return block;
 }
 
-function runDamageDetails(run) {
-  const damage = run.damage || {};
-  const known = n => typeof n === "number" && Number.isFinite(n) && n >= 0;
+function runDamageDetails(run: HistoryRun): HTMLElement {
+  const damage: Record<string, unknown> = isRecord(run.damage) ? run.damage : {};
+  const known = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
   const total = damage.total;
   const block = make("div", "run-block run-damage-details");
   block.append(make("div", "kicker", "Damage dealt"), make("div", "run-detail-total", formatStat(total)));
@@ -1396,25 +1512,26 @@ function runDamageDetails(run) {
   return block;
 }
 
-function runDetail(run) {
+function runDetail(run: HistoryRun): HTMLElement {
   const detail = make("div", "run-detail");
   const inventory = make("div", "run-inventory");
   inventory.append(runMelodies(run), runObjects(run));
-  const entries = [
+  const entries: Array<readonly [string, string, HTMLElement]> = [
     ["hero", "Hero Details", runHeroDetails(run)],
     ["score", "Score Details", runScoreDetails(run)],
     ["inventory", "Melodies and Magical Objects", inventory],
     ["damage", "Damage Dealt", runDamageDetails(run)],
-    ...RUN_STAT_GROUPS.slice(1).map(([title, key, rows]) => {
-      const group = run[key] && typeof run[key] === "object" ? run[key] : {};
-      return [key, title, statBlock(title, rows.map(([field, label]) => [label, formatStat(group[field])]))];
+    ...RUN_STAT_GROUPS.slice(1).map(([title, key, rows]): readonly [string, string, HTMLElement] => {
+      const stored = run[key];
+      const group: Record<string, unknown> = isRecord(stored) ? stored : {};
+      return [key, title, statBlock(title, rows.map(([field, label]): readonly [string, string] => [label, formatStat(group[field])]))];
     }),
   ];
   const tabs = make("div", "run-detail-tabs");
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Run details");
   const panels = make("div", "run-detail-panels");
-  const buttons = [], pages = [];
+  const buttons: HTMLButtonElement[] = [], pages: HTMLElement[] = [];
   const prefix = `run-${String(run.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   entries.forEach(([key, label, content]) => {
     const tab = make("button", "run-detail-tab", key === "hero" ? undefined : label);
@@ -1441,21 +1558,21 @@ function runDetail(run) {
     buttons.push(tab); pages.push(panel);
     tabs.append(tab); panels.append(panel);
   });
-  const select = (index, focus = false) => {
+  const select = (index: number, focus = false): void => {
     buttons.forEach((button, i) => {
       const selected = i === index;
       button.setAttribute("aria-selected", String(selected));
       button.tabIndex = selected ? 0 : -1;
-      pages[i].hidden = !selected;
+      must(pages[i], "detail page").hidden = !selected;
     });
-    runDetailTabs.set(run.id, entries[index][0]);
+    runDetailTabs.set(run.id, must(entries[index], "detail entry")[0]);
     hideTip();
-    if (focus) buttons[index].focus();
+    if (focus) must(buttons[index], "detail tab").focus();
   };
   buttons.forEach((button, i) => {
     button.addEventListener("click", () => select(i));
     button.addEventListener("keydown", event => {
-      let next;
+      let next: number;
       if (event.key === "ArrowRight") next = (i + 1) % buttons.length;
       else if (event.key === "ArrowLeft") next = (i + buttons.length - 1) % buttons.length;
       else if (event.key === "Home") next = 0;
@@ -1480,8 +1597,8 @@ function runDetail(run) {
   return detail;
 }
 
-function renderHistory() {
-  const host = el("history-list");
+function renderHistory(): void {
+  const host = elMaybe("history-list");
   if (!host) return;
   host.textContent = "";
   renderHistoryToolbar();
@@ -1496,7 +1613,7 @@ function renderHistory() {
   for (const run of runs) host.append(runCard(run));
 }
 
-function applyHistory(h) {
+function applyHistory(h: HistoryPayload | null | undefined): void {
   historyRuns = h && Array.isArray(h.runs) ? h.runs : [];
   historySkipped = h && typeof h.skipped === "number" ? h.skipped : 0;
   const ids = new Set(historyRuns.map(run => run.id));
@@ -1507,7 +1624,7 @@ function applyHistory(h) {
   if (lastRenderedFrame) renderDiag(lastRenderedFrame);
 }
 
-function setView(next) {
+function setView(next: string): void {
   view = next === "history" ? "history" : "live";
   const history = view === "history";
   document.body.classList.toggle("view-history", history);
@@ -1520,33 +1637,36 @@ function setView(next) {
 }
 
 let shareBusy = false;
-const shareStatuses = new Map();
+const shareStatuses = new Map<number, string>();
 
-function refreshShareButtons() {
+function refreshShareButtons(): void {
   for (const button of document.querySelectorAll(".run-share")) {
+    if (!(button instanceof HTMLButtonElement)) continue;
     button.disabled = shareBusy || typeof window.ravenswatch?.shareRun !== "function";
     button.textContent = shareBusy && Number(button.dataset.runId) === sharingRunId ? "Copying…" : "Share Run";
-    button.previousElementSibling.textContent = shareStatuses.get(Number(button.dataset.runId)) || "";
+    const status = must(button.previousElementSibling, "share status");
+    status.textContent = shareStatuses.get(Number(button.dataset.runId)) || "";
   }
 }
 
-let sharingRunId = null;
+let sharingRunId: number | null = null;
 
-async function shareRun(id) {
-  if (shareBusy || typeof window.ravenswatch?.shareRun !== "function") return;
+async function shareRun(id: number): Promise<void> {
+  const bridge = window.ravenswatch;
+  if (shareBusy || !bridge || typeof bridge.shareRun !== "function") return;
   shareBusy = true;
   sharingRunId = id;
   shareStatuses.set(id, "");
   refreshShareButtons();
   try {
-    const result = await window.ravenswatch.shareRun({
+    const result = await bridge.shareRun({
       runId: id,
       stylizedFonts: document.body.classList.contains("stylized-fonts"),
     });
     if (!result.ok) throw new Error(result.error || "Could not copy this run.");
     shareStatuses.set(id, "Copied to clipboard");
   } catch (error) {
-    shareStatuses.set(id, error.message || "Could not copy this run.");
+    shareStatuses.set(id, errorMessage(error, "Could not copy this run."));
   } finally {
     shareBusy = false;
     sharingRunId = null;
@@ -1554,30 +1674,32 @@ async function shareRun(id) {
   }
 }
 
-function canDeleteHistory() {
+function canDeleteHistory(): boolean {
   const bridge = window.ravenswatch;
-  return !!bridge && ["prepareHistoryDeletion", "confirmHistoryDeletion", "cancelHistoryDeletion"].every(key => typeof bridge[key] === "function");
+  return !!bridge && typeof bridge.prepareHistoryDeletion === "function"
+    && typeof bridge.confirmHistoryDeletion === "function"
+    && typeof bridge.cancelHistoryDeletion === "function";
 }
 
-function renderHistoryToolbar() {
+function renderHistoryToolbar(): void {
   el("history").classList.toggle("history-selecting", selectingHistory);
   const available = canDeleteHistory() && historyRuns.length > 0;
-  el("history-select").hidden = selectingHistory;
-  el("history-select").disabled = !available;
-  el("history-delete-all").disabled = !available;
+  el("history-select", HTMLButtonElement).hidden = selectingHistory;
+  el("history-select", HTMLButtonElement).disabled = !available;
+  el("history-delete-all", HTMLButtonElement).disabled = !available;
   el("history-select-all-label").hidden = !selectingHistory;
   el("history-selection-cancel").hidden = !selectingHistory;
-  const remove = el("history-delete-selected");
+  const remove = el("history-delete-selected", HTMLButtonElement);
   remove.hidden = !selectingHistory;
   remove.disabled = !available || !selectedHistory.size;
   remove.textContent = `Delete selected (${selectedHistory.size})`;
-  const all = el("history-select-all");
+  const all = el("history-select-all", HTMLInputElement);
   all.disabled = !available;
   all.checked = historyRuns.length > 0 && selectedHistory.size === historyRuns.length;
   all.indeterminate = selectedHistory.size > 0 && !all.checked;
 }
 
-function renderHistoryDeletion() {
+function renderHistoryDeletion(): void {
   const state = historyDelete;
   if (!state) return;
   const count = state.ids.length;
@@ -1599,85 +1721,96 @@ function renderHistoryDeletion() {
   }
   el("history-delete-phrase").hidden = !phrase;
   el("history-delete-prompt").textContent = `Type DELETE ${count} to confirm the number of records.`;
-  const confirm = el("history-delete-confirm");
+  const confirm = el("history-delete-confirm", HTMLButtonElement);
   confirm.textContent = historyDeleteBusy ? "Please wait…" : final ? "Permanently delete" : phrase ? "Confirm record count" : "Confirm selection";
-  confirm.disabled = historyDeleteBusy || (phrase && el("history-delete-input").value !== `DELETE ${count}`);
-  el("history-delete-cancel").disabled = historyDeleteBusy;
-  el("history-delete-input").disabled = historyDeleteBusy;
+  confirm.disabled = historyDeleteBusy || (phrase && el("history-delete-input", HTMLInputElement).value !== `DELETE ${count}`);
+  el("history-delete-cancel", HTMLButtonElement).disabled = historyDeleteBusy;
+  el("history-delete-input", HTMLInputElement).disabled = historyDeleteBusy;
 }
 
-async function beginHistoryDeletion(scope, ids) {
-  if (!canDeleteHistory() || historyDeleteBusy || el("history-delete-dialog").open) return;
-  historyDeleteFocus = document.activeElement;
+async function beginHistoryDeletion(scope: HistoryDeletionScope, ids?: number[]): Promise<void> {
+  const bridge = window.ravenswatch;
+  if (!bridge || !canDeleteHistory() || historyDeleteBusy || el("history-delete-dialog", HTMLDialogElement).open) return;
+  historyDeleteFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   historyDeleteBusy = true;
   historyDelete = { scope, ids: ids || historyRuns.map(run => run.id), step: 1, steps: scope === "single" ? 2 : 3 };
   el("history-delete-error").textContent = "";
-  el("history-delete-input").value = "";
+  el("history-delete-input", HTMLInputElement).value = "";
   hideTip();
   renderHistoryDeletion();
-  el("history-delete-dialog").showModal();
+  el("history-delete-dialog", HTMLDialogElement).showModal();
   try {
-    const result = await window.ravenswatch.prepareHistoryDeletion(scope === "all" ? { scope } : { scope, ids });
+    const result = await bridge.prepareHistoryDeletion(scope === "all" ? { scope } : { scope, ids });
     if (!result.ok) throw new Error(result.error);
     historyDelete = result;
   } catch (error) {
     historyDelete = null;
-    el("history-delete-error").textContent = error.message || "Could not prepare deletion.";
+    el("history-delete-error").textContent = errorMessage(error, "Could not prepare deletion.");
   } finally {
     historyDeleteBusy = false;
     renderHistoryDeletion();
-    el("history-delete-cancel").disabled = false;
-    if (!historyDelete) el("history-delete-confirm").disabled = true;
+    el("history-delete-cancel", HTMLButtonElement).disabled = false;
+    if (!historyDelete) el("history-delete-confirm", HTMLButtonElement).disabled = true;
     el("history-delete-cancel").focus();
   }
 }
 
-async function confirmHistoryDeletion() {
-  if (!historyDelete?.token || historyDeleteBusy) return;
+// A fresh read of the module state, for code that runs after awaits and
+// assignments the compiler's narrowing has already folded in.
+function currentDeletion(): HistoryDeletionState | null { return historyDelete; }
+
+async function confirmHistoryDeletion(): Promise<void> {
+  const bridge = window.ravenswatch;
+  const pending = historyDelete;
+  if (!bridge || !pending?.token || historyDeleteBusy) return;
   historyDeleteBusy = true;
   el("history-delete-error").textContent = "";
   renderHistoryDeletion();
   try {
-    const result = await window.ravenswatch.confirmHistoryDeletion({ token: historyDelete.token, typed: el("history-delete-input").value });
+    const result = await bridge.confirmHistoryDeletion({ token: pending.token, typed: el("history-delete-input", HTMLInputElement).value });
     if (!result.ok) throw new Error(result.error);
     if (result.done) {
       historyDelete = null;
       selectingHistory = false;
       selectedHistory.clear();
       renderHistory();
-      el("history-delete-dialog").close();
+      el("history-delete-dialog", HTMLDialogElement).close();
       el("history-select").focus();
     } else {
-      historyDelete.step = result.step;
-      el("history-delete-input").value = "";
+      // main.js always sends the next step with done: false; keep the current
+      // one rather than paint "undefined" if it ever did not.
+      if (result.step !== undefined) pending.step = result.step;
+      el("history-delete-input", HTMLInputElement).value = "";
     }
   } catch (error) {
     // A failed commit consumes its token; require a new review before retrying.
-    const token = historyDelete?.token;
+    const token = pending.token;
     historyDelete = null;
-    if (token) window.ravenswatch.cancelHistoryDeletion(token).catch(() => {});
-    el("history-delete-error").textContent = error.message || "History could not be deleted.";
-    el("history-delete-confirm").disabled = true;
+    if (token) bridge.cancelHistoryDeletion(token).catch(() => {});
+    el("history-delete-error").textContent = errorMessage(error, "History could not be deleted.");
+    el("history-delete-confirm", HTMLButtonElement).disabled = true;
   } finally {
     historyDeleteBusy = false;
     renderHistoryDeletion();
-    el("history-delete-cancel").disabled = false;
-    if (el("history-delete-dialog").open) {
-      (historyDelete?.steps === 3 && historyDelete.step === 2 ? el("history-delete-input") : el("history-delete-cancel")).focus();
+    el("history-delete-cancel", HTMLButtonElement).disabled = false;
+    if (el("history-delete-dialog", HTMLDialogElement).open) {
+      const current = currentDeletion();
+      (current?.steps === 3 && current.step === 2 ? el("history-delete-input") : el("history-delete-cancel")).focus();
     }
   }
 }
 
-function cancelHistoryDeletion() {
+function cancelHistoryDeletion(): void {
   if (historyDeleteBusy) return;
   const token = historyDelete?.token;
   historyDelete = null;
-  if (token) window.ravenswatch.cancelHistoryDeletion(token).catch(() => {});
-  el("history-delete-dialog").close();
+  const bridge = window.ravenswatch;
+  if (token && bridge) bridge.cancelHistoryDeletion(token).catch(() => {});
+  el("history-delete-dialog", HTMLDialogElement).close();
   (historyDeleteFocus?.isConnected ? historyDeleteFocus : el("history-select")).focus();
 }
 
-function initHistoryDeletion() {
+function initHistoryDeletion(): void {
   el("history-select").addEventListener("click", () => {
     selectingHistory = true;
     renderHistory();
@@ -1689,7 +1822,7 @@ function initHistoryDeletion() {
   });
   el("history-select-all").addEventListener("change", event => {
     selectedHistory.clear();
-    if (event.target.checked) for (const run of historyRuns) selectedHistory.add(run.id);
+    if (event.target instanceof HTMLInputElement && event.target.checked) for (const run of historyRuns) selectedHistory.add(run.id);
     renderHistory();
   });
   el("history-delete-selected").addEventListener("click", () => beginHistoryDeletion(selectedHistory.size === 1 ? "single" : "selected", [...selectedHistory]));
@@ -1697,20 +1830,21 @@ function initHistoryDeletion() {
   el("history-delete-cancel").addEventListener("click", cancelHistoryDeletion);
   el("history-delete-confirm").addEventListener("click", confirmHistoryDeletion);
   el("history-delete-input").addEventListener("input", renderHistoryDeletion);
-  el("history-delete-dialog").addEventListener("cancel", event => {
+  const dialog = el("history-delete-dialog", HTMLDialogElement);
+  dialog.addEventListener("cancel", event => {
     event.preventDefault();
     cancelHistoryDeletion();
   });
-  el("history-delete-dialog").addEventListener("click", event => {
-    if (event.target !== event.currentTarget) return;
-    const rect = event.currentTarget.getBoundingClientRect();
+  dialog.addEventListener("click", event => {
+    if (event.target !== dialog) return;
+    const rect = dialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
       cancelHistoryDeletion();
     }
   });
 }
 
-function initHistory() {
+function initHistory(): void {
   el("tab-live").addEventListener("click", () => setView("live"));
   el("tab-history").addEventListener("click", () => setView("history"));
   // Arrow keys move between the two view tabs and activate, as the run-detail
@@ -1718,15 +1852,16 @@ function initHistory() {
   const viewTabs = ["live", "history"];
   viewTabs.forEach((name, i) => {
     el(`tab-${name}`).addEventListener("keydown", event => {
-      let next;
+      let next: number;
       if (event.key === "ArrowRight") next = (i + 1) % viewTabs.length;
       else if (event.key === "ArrowLeft") next = (i + viewTabs.length - 1) % viewTabs.length;
       else if (event.key === "Home") next = 0;
       else if (event.key === "End") next = viewTabs.length - 1;
       else return;
       event.preventDefault();
-      setView(viewTabs[next]);
-      el(`tab-${viewTabs[next]}`).focus();
+      const target = must(viewTabs[next], "view tab");
+      setView(target);
+      el(`tab-${target}`).focus();
     });
   });
   renderHistory();
@@ -1744,27 +1879,28 @@ initUpdateBar();
 initHistoryDeletion();
 initHistory();
 
-if (ELECTRON_TRANSPORT) {
-  window.ravenswatch.onState((frame) => {
-    if (frame.error) {
+const transport = window.ravenswatch;
+if (ELECTRON_TRANSPORT && transport) {
+  transport.onState((frame) => {
+    if ("error" in frame) {
       markStale();
       return;
     }
     render(frame);
   });
-  if (typeof window.ravenswatch.onSidecarDown === "function") {
-    window.ravenswatch.onSidecarDown(({ message }) => {
+  if (typeof transport.onSidecarDown === "function") {
+    transport.onSidecarDown(({ message }) => {
       renderSidecarDown(message);
     });
   }
-  if (typeof window.ravenswatch.onAssets === "function") {
-    window.ravenswatch.onAssets(applyAssets);
+  if (typeof transport.onAssets === "function") {
+    transport.onAssets(applyAssets);
   }
-  if (typeof window.ravenswatch.onUpdate === "function") {
-    window.ravenswatch.onUpdate(applyUpdate);
+  if (typeof transport.onUpdate === "function") {
+    transport.onUpdate(applyUpdate);
   }
-  if (typeof window.ravenswatch.onHistory === "function") {
-    window.ravenswatch.onHistory(applyHistory);
+  if (typeof transport.onHistory === "function") {
+    transport.onHistory(applyHistory);
   }
 } else {
   renderNoTransport();
@@ -1772,13 +1908,13 @@ if (ELECTRON_TRANSPORT) {
 
 // Title bar chrome. Feature-detected: a page without these bridge members
 // (or without a bridge at all) just keeps the plain header.
-function initWindowChrome() {
+function initWindowChrome(): void {
   const bridge = window.ravenswatch;
   if (!bridge) return;
   if (typeof bridge.platform === "string") {
     document.documentElement.classList.add(`platform-${bridge.platform}`);
   }
-  const apply = state => {
+  const apply = (state: { readonly maximized: boolean; readonly focused: boolean; readonly fullScreen: boolean }): void => {
     if (!state || typeof state !== "object") return;
     const root = document.documentElement.classList;
     root.toggle("window-inactive", state.focused === false);
