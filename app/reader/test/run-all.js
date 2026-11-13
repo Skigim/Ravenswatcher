@@ -39,8 +39,23 @@ const SUITES = [
   ['test-runs', () => require('./test-runs').main()],
   ['test-history', () => require('./test-history').main()],
   ['test-history-record', () => require('./test-history-record').main()],
+  ['test-process-backend', () => require('./test-process-backend').main()],
   ['test-history-deletion', () => require('./test-history-deletion').main()],
 ];
+
+// Suites that need a real or fake WINDOWS process: they attach through
+// win32.ts (OpenProcess, ReadProcessMemory, toolhelp) to a spawned
+// fakegame.js or a throwaway child, or spawn the stdio entry point against
+// one. They cannot run elsewhere, and on another platform they are reported
+// as SKIPPED by name rather than dropped, so a skip never reads as a pass.
+// Everything not listed here is portable and runs on every platform.
+const WINDOWS_ONLY = new Set([
+  'test-readonly', 'test-chain', 'test-placement', 'test-cadence', 'test-reattach',
+  'test-stdio', 'test-worker-lifecycle',
+  // Not a process fixture: it runs stage-dist.js, which stages the
+  // Windows-only koffi package that installs on other platforms omit.
+  'test-no-shipped-content',
+]);
 
 // Suites that cannot run in this process. test-seams drives the real page in
 // a real window, so it needs an Electron runtime rather than plain node, and
@@ -140,7 +155,13 @@ function runSpawned(name, entry, electron) {
 
 (async () => {
   let total = 0;
+  const skipped = [];
   for (const [name, run] of SUITES) {
+    if (WINDOWS_ONLY.has(name) && process.platform !== 'win32') {
+      console.log(`\n${name}: SKIPPED -- needs a Windows process (platform is ${process.platform})`);
+      skipped.push(name);
+      continue;
+    }
     let f;
     try { f = await run(); }
     catch (e) { console.log(`\n${name}: THREW ${e.stack}`); f = 1; }
@@ -152,6 +173,7 @@ function runSpawned(name, entry, electron) {
   for (const [name, entry] of SPAWNED) total += runSpawned(name, entry, electron);
 
 
+  if (skipped.length) console.log(`\nSKIPPED (Windows-only): ${skipped.join(', ')}`);
   console.log(`\n${total === 0 ? 'ALL SUITES PASSED' : total + ' FAILURE(S)'}`);
   process.exit(total ? 1 : 0);
 })();

@@ -7,6 +7,7 @@
 import type { MelodySlotView } from './melodies';
 import type { RunSummary } from './runs';
 import type { SandmanOffer, SandmanStatus } from './sandman';
+import type { MelodyStatus, Placement } from './state';
 import type { PlacedTile } from './tiles';
 
 /** Parent -> worker, every worker. WorkerControl consumes it; Reader never sends it to tiles. */
@@ -49,3 +50,30 @@ export type TilesWorkerInbound =
 
 export type TilesWorkerOutbound = WorkerStatusMessage
   | { type: 'tiles'; tiles: readonly PlacedTile[] | null };
+
+// ------------------------------------------------------------------ sweep --
+
+/** Parent -> sweep worker: only the cooperative stop. */
+export type SweepWorkerInbound = StopMessage;
+
+/** One resolved tracked value, as the sweep posts it and the main thread polls it. */
+export interface SweepBinding { binding_addr: number; variant: 'inline' | 'boxed-int'; is_float: boolean }
+
+/** The per-sweep result Reader._handleSweepMessage stores wholesale. */
+export interface SweepResult {
+  type: 'sweep';
+  found: Record<string, SweepBinding>;
+  mapNames: Record<number, string> | null;
+  placement: Placement | null;
+  melodies: MelodySlotView[] | null;
+  melody_status: MelodyStatus;
+  sweeps: number;
+  placement_misses: number;
+  took_ms: number;
+  mapId: number | null;
+  runReset: boolean;
+}
+
+export type SweepWorkerOutbound = WorkerStatusMessage
+  | { type: 'binding_vt'; ready: true }
+  | SweepResult;

@@ -1,4 +1,3 @@
-'use strict';
 // A .read(addr, size) source backed by a PE file on disk, presenting the
 // image the way the loader would map it: `base + rva` addresses resolve
 // through the section table to raw file offsets.
@@ -11,20 +10,25 @@
 // nothing here can show that the walk finds the right classes in
 // Ravenswatch.exe specifically. It shows the walk is structurally correct.
 
-const fs = require('fs');
+import fs from 'fs';
+import type { PeSection } from './pe';
 
-class PeFileSource {
-  /** @param {string} file  @param {number} base  pretend load address */
-  constructor(file, base = 0x0000000180000000) {
+export class PeFileSource {
+  readonly buf: Buffer;
+  readonly base: number;
+  readonly file: string;
+  readonly sections: PeSection[] = [];
+  sizeOfHeaders = 0;
+
+  /** `base` is the pretend load address. */
+  constructor(file: string, base = 0x0000000180000000) {
     this.buf = fs.readFileSync(file);
     this.base = base;
     this.file = file;
-    this.sections = [];
-    this.sizeOfHeaders = 0;
     this._parseHeaders();
   }
 
-  _parseHeaders() {
+  private _parseHeaders(): void {
     const b = this.buf;
     if (b.readUInt16LE(0) !== 0x5a4d) throw new Error(`${this.file}: not MZ`);
     const e = b.readUInt32LE(0x3c);
@@ -50,7 +54,7 @@ class PeFileSource {
     }
   }
 
-  _fileOffset(rva) {
+  private _fileOffset(rva: number): number {
     if (rva < this.sizeOfHeaders) return rva;
     for (const s of this.sections) {
       if (rva >= s.vaddr && rva < s.vaddr + Math.max(s.vsize, s.rawSize)) {
@@ -63,7 +67,7 @@ class PeFileSource {
   }
 
   /** Returns a view into the backing file buffer rather than a copy (or null when unreadable). Callers must not mutate it. */
-  read(addr, size) {
+  read(addr: number, size: number): Buffer | null {
     const rva = addr - this.base;
     if (rva < 0) return null;
     const off = this._fileOffset(rva);
@@ -73,17 +77,15 @@ class PeFileSource {
     return this.buf.subarray(off, end);
   }
 
-  readPtr(addr) {
+  readPtr(addr: number): number | null {
     const d = this.read(addr, 8);
     if (!d || d.length < 8) return null;
     return d.readUInt32LE(4) * 4294967296 + d.readUInt32LE(0);
   }
 
-  readI32(addr) {
+  readI32(addr: number): number | null {
     const d = this.read(addr, 4);
     if (!d || d.length < 4) return null;
     return d.readInt32LE(0);
   }
 }
-
-module.exports = { PeFileSource };

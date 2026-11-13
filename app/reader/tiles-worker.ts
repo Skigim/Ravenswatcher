@@ -22,10 +22,7 @@ import { parentPort, workerData, isMainThread } from 'worker_threads';
 import * as tiles from './tiles';
 import type { PlacedTile, TilesVtables, TilesSource } from './tiles';
 import type { TilesWorkerInbound, TilesWorkerOutbound } from './worker-messages';
-
-// win32.js is still JavaScript; require it directly.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { openProcess } = require('./win32');
+import { getProcessBackend } from './backend';
 
 export const TILES_POLL_MS = 1500;
 export const TILES_SETTLED_POLL_MS = 15000;
@@ -106,7 +103,7 @@ export async function runWorker(
     proc = options.proc;
   } else {
     try {
-      proc = openProcess(pid) as WorkerProcess;
+      proc = getProcessBackend().open(pid);
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e), port);
     }

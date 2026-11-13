@@ -69,25 +69,27 @@ to a gitignored `.js` beside it; edit the `.ts`. Files listed as `.js` are
 tracked JavaScript.
 
 ```
-win32.js       koffi bindings. Read-only by construction: no write or inject
+win32.ts       koffi bindings and the Windows ProcessBackend. Read-only by construction: no write or inject
                primitive is bound, and openProcess() takes no access-mask
                argument a caller could widen.
 scratch.ts     reusable Buffer-backed scratch memory for native reads, shared by
-               win32.js and scan.js
+               win32.ts and scan.ts
 process.ts     platform-neutral process backend types (discovery, module
-               identity, regions, reads, liveness, close); not wired in yet
+               identity, regions, reads, liveness, close)
+backend.ts     getProcessBackend(): platform -> ProcessBackend; EUNSUPPORTED
+               for a platform with no backend
 pe.ts          PE section headers out of a mapped image
-pefile.js      a .read() source backed by a PE file on disk, so the RTTI walk
+pefile.ts      a .read() source backed by a PE file on disk, so the RTTI walk
                can be exercised without attaching to anything
-rtti.js        TypeDescriptor -> Complete Object Locator -> vtable, and the
+rtti.ts        TypeDescriptor -> Complete Object Locator -> vtable, and the
                inverse (vtable -> class name)
-scan.js        the sweep primitive: every 8-byte-aligned occurrence of a
+scan.ts        the sweep primitive: every 8-byte-aligned occurrence of a
                target set, one pass for all targets
 values.ts      name index, binding join, both union
                variants, .gen/JSON type map
 struct_offsets.json
                measured struct layout constants used by values.ts
-placement.js   which entities the map generator actually placed
+placement.ts   which entities the map generator actually placed
 melodies.ts    4th channel: 3-melody pool resolution and per-slot lifecycle
 sandman.ts     the shop channel: six offers, prices and sold state, read off
                the menu controller's fixed slot array at +0x178
@@ -100,11 +102,11 @@ runs.ts        the run-end channel: run record, selected talents, score page
                and the score readiness rule
 runs-worker.ts the end-of-run capture on its own worker thread
 state.ts       the output contract
-sweeper.js     the discovery sweep (values, placement, melodies), on a
-               worker thread
+sweeper.ts     the discovery sweep (values, placement, melodies), on a
+               worker thread; opens its handle via getProcessBackend()
 worker-control.ts stop messages and interruptible waits
-reader.js      attach + poll + asynchronous cooperative close
-stdio.js       one JSON object per line on stdout
+reader.ts      attach through the process backend + poll + asynchronous cooperative close
+stdio.ts       one JSON object per line on stdout (emits stdio.js, the sidecar entry path)
 ```
 
 Distribution staging excludes tests, benchmarks, and documentation. See the
@@ -183,7 +185,7 @@ The regression tests cover these reader-specific constraints:
   every tracked binding held its address across two run restarts and six
   level-ups over 230 independent rebuilds. A map change within a run is the
   one event not yet observed — the rebuild on map change covers it either
-  way. `reader.js` still replaces the resolved table wholesale on every
+  way. `reader.ts` still replaces the resolved table wholesale on every
   sweep rather than merging, so a name that stops resolving disappears
   instead of lingering. Covered by `test-binding-cache` and `test-chain`.
 
@@ -196,6 +198,6 @@ The regression tests cover these reader-specific constraints:
   repeating a cold scan costs a second full heap pass for a result that cannot
   differ. `heroRescanDue` and `fallbackHeroSource` are exported for exactly
   that reason, and `test-questline` pins both.
-- **The only argument is an optional PID.** `stdio.js` rejects anything that
+- **The only argument is an optional PID.** `stdio.ts` rejects anything that
   does not parse as one, rather than handing `NaN` to `OpenProcess`, which
   reports `GetLastError=87` instead of the game-not-running message.

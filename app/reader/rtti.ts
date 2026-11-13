@@ -1,4 +1,3 @@
-'use strict';
 // MSVC RTTI vtable discovery: class name -> vtable RVAs, and the inverse
 // (vtable -> class name) walk.
 //
@@ -8,23 +7,26 @@
 // Runs against any {read(addr,size)} source -- the live process or a
 // file-backed PE image.
 
-const { parseSections } = require('./pe');
+import { parseSections } from './pe';
+import type { ByteSource, PeSection } from './pe';
 
-const SCAN_CHUNK = 4 * 1024 * 1024;
+export const SCAN_CHUNK = 4 * 1024 * 1024;
 
 // The GlobalValue pair every sweep needs. Other channels resolve their own
 // classes by name, through resolveAllVtableRvas or a names map of their own.
-const RTTI_NAMES = {
+export const RTTI_NAMES: Record<string, string> = {
   oCGlobalEntityValueSettings: '.?AVoCGlobalEntityValueSettings@@\0',
   oCEntityValueUnion: '.?AVoCEntityValueUnion@@\0',
 };
 
 /** Every occurrence of `pattern` (Buffer) inside one section, as addresses. */
-function scanSection(source, base, section, pattern) {
+export function scanSection(
+  source: ByteSource, base: number, section: PeSection, pattern: Buffer,
+): number[] {
   const start = base + section.vaddr;
   const size = section.vsize;
   const overlap = pattern.length;
-  const results = [];
+  const results: number[] = [];
   let offset = 0;
   while (offset < size) {
     const toRead = Math.min(SCAN_CHUNK, size - offset);
@@ -46,15 +48,20 @@ function scanSection(source, base, section, pattern) {
   return results;
 }
 
-function sectionsOf(source, base) {
+export function sectionsOf(source: ByteSource, base: number): {
+  secs: PeSection[];
+  data: PeSection | undefined;
+  rdata: PeSection | undefined;
+  search: PeSection[] | null;
+} {
   const secs = parseSections(source, base);
   const data = secs.find(s => s.name === '.data');
   const rdata = secs.find(s => s.name === '.rdata');
   return { secs, data, rdata, search: data && rdata ? [rdata, data] : null };
 }
 
-function u32le(v) { const b = Buffer.allocUnsafe(4); b.writeUInt32LE(v >>> 0); return b; }
-function u64le(v) {
+function u32le(v: number): Buffer { const b = Buffer.allocUnsafe(4); b.writeUInt32LE(v >>> 0); return b; }
+function u64le(v: number): Buffer {
   const b = Buffer.allocUnsafe(8);
   b.writeUInt32LE(v >>> 0, 0);
   b.writeUInt32LE(Math.floor(v / 4294967296) >>> 0, 4);
@@ -67,7 +74,7 @@ function u64le(v) {
  * a stray dword that merely equals the TypeDescriptor RVA from being taken
  * for a locator.
  */
-function readCol(source, base, colAddr) {
+function readCol(source: ByteSource, base: number, colAddr: number): Buffer | null {
   const col = source.read(colAddr, 0x18);
   if (!col || col.length < 0x18) return null;
   if (col.readUInt32LE(0) !== 1) return null;
@@ -82,7 +89,10 @@ function readCol(source, base, colAddr) {
  * at the first. Walks every name hit, so an accidental duplicate string before
  * the true TypeDescriptor does not end the search.
  */
-function* vtableRvas(source, base, dataSec, searchSections, rttiName) {
+function* vtableRvas(
+  source: ByteSource, base: number, dataSec: PeSection,
+  searchSections: readonly PeSection[], rttiName: string,
+): Generator<number, void, undefined> {
   for (const nameHit of scanSection(source, base, dataSec, Buffer.from(rttiName, 'latin1'))) {
     const tdRvaBytes = u32le(nameHit - 0x10 - base);
     for (const sec of searchSections) {
@@ -99,16 +109,21 @@ function* vtableRvas(source, base, dataSec, searchSections, rttiName) {
 }
 
 /** TypeDescriptor name -> the first vtable RVA found for it, or null. */
-function resolveOneVtable(source, base, dataSec, searchSections, rttiName) {
+export function resolveOneVtable(
+  source: ByteSource, base: number, dataSec: PeSection,
+  searchSections: readonly PeSection[], rttiName: string,
+): number | null {
   for (const rva of vtableRvas(source, base, dataSec, searchSections, rttiName)) return rva;
   return null;
 }
 
 /** key -> vtable RVA (or null) for each entry of `names`, re-scanned per call. */
-function resolveVtableRvas(source, base, names = RTTI_NAMES) {
+export function resolveVtableRvas(
+  source: ByteSource, base: number, names: Record<string, string> = RTTI_NAMES,
+): Record<string, number | null | undefined> {
   const { data, search } = sectionsOf(source, base);
-  if (!search) return {};
-  const out = {};
+  if (!data || !search) return {};
+  const out: Record<string, number | null | undefined> = {};
   for (const [key, name] of Object.entries(names)) {
     out[key] = resolveOneVtable(source, base, data, search, name);
   }
@@ -120,14 +135,21 @@ function resolveVtableRvas(source, base, names = RTTI_NAMES) {
  * classes have more than one, and instances store the primary at +0x00, so
  * callers try each.
  */
-function resolveAllVtableRvas(source, base, rttiName) {
+export function resolveAllVtableRvas(source: ByteSource, base: number, rttiName: string): number[] {
   const { data, search } = sectionsOf(source, base);
-  if (!search) return [];
+  if (!data || !search) return [];
   return [...new Set(vtableRvas(source, base, data, search, rttiName))].sort((a, b) => a - b);
 }
 
+/** A byte source that can also read a pointer (a live process or PeFileSource). */
+export interface PointerSource extends ByteSource {
+  readPtr(addr: number): number | null;
+}
+
 /** Inverse RTTI: vtable address -> mangled class name. */
-function classOfVtable(source, base, size, vt) {
+export function classOfVtable(
+  source: PointerSource, base: number, size: number, vt: number | null | undefined,
+): string | null {
   if (!vt || !(vt >= base && vt < base + size)) return null;
   const colAddr = source.readPtr(vt - 8);
   if (!colAddr || !(colAddr >= base && colAddr < base + size)) return null;
@@ -138,9 +160,3 @@ function classOfVtable(source, base, size, vt) {
   const z = nm.indexOf(0);
   return nm.subarray(0, z === -1 ? nm.length : z).toString('latin1');
 }
-
-module.exports = {
-  RTTI_NAMES, SCAN_CHUNK,
-  scanSection, sectionsOf, resolveOneVtable, resolveVtableRvas,
-  resolveAllVtableRvas, classOfVtable,
-};

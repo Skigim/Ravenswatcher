@@ -22,10 +22,7 @@ import type { ScanSource } from './scan';
 import * as rtti from './rtti';
 import { scanPointers } from './scan';
 import { CURRENT_MAP_ID } from './state';
-
-// win32.js is still JavaScript; require it directly.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { openProcess } = require('./win32');
+import { getProcessBackend } from './backend';
 
 export const RUNS_POLL_MS = 250;
 export const RECORD_FIND_MS = 10000;
@@ -83,7 +80,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   const control = new WorkerControl(parentPort);
   let proc: WorkerProcess;
   try {
-    proc = openProcess(pid) as WorkerProcess;
+    proc = getProcessBackend().open(pid);
   } catch (e) {
     control.dispose();
     return post({ type: 'fatal', message: message(e) });
