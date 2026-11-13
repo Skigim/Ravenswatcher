@@ -7,7 +7,7 @@
 // cache from the game install the sidecar reports (see assets/build.ts).
 // Supervision of the reader process itself -- spawn, stdout line parsing,
 // stderr tail, exit/close handling, retry backoff, tree-kill -- lives in
-// ./sidecar.js, which knows nothing about Electron or about IPC channel
+// ./sidecar.ts, which knows nothing about Electron or about IPC channel
 // names. See that file's header for the seam.
 //
 // The transport is stdio-over-IPC: sidecar.js spawns `reader/stdio.js` on
@@ -19,18 +19,33 @@
 // sidecar's stderr is diagnostic text (the attach banner, tracebacks), never
 // state: it's logged and never parsed as a frame.
 
-const { app, BrowserWindow, shell, protocol, net, ipcMain } = require('electron');
-const { isAllowedExternal } = require('./external-links');
-const fs = require('fs');
-const path = require('path');
-const { pathToFileURL } = require('url');
-const { Worker } = require('worker_threads');
-const { createSidecar } = require('./sidecar');
-const { createLifecycle } = require('./lifecycle');
-const { CACHE_DIR_NAME } = require('./assets/build');
-const { checkForUpdate } = require('./update');
-const { RunSharer } = require('./share');
-const { HISTORY_FILE, loadHistory, appendRun, deleteRuns, clearHistory, HistoryDeletion } = require('./history');
+import { app, BrowserWindow, shell, protocol, net, ipcMain } from 'electron';
+import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
+import { pathToFileURL } from 'url';
+import { Worker } from 'worker_threads';
+import { isAllowedExternal } from './external-links';
+import { createSidecar } from './sidecar';
+import { createLifecycle } from './lifecycle';
+import { CACHE_DIR_NAME } from './assets/build';
+import { checkForUpdate } from './update';
+import type { UpdateCheck } from './update';
+import { RunSharer } from './share';
+import { HISTORY_FILE, loadHistory, appendRun, deleteRuns, clearHistory, HistoryDeletion } from './history';
+import type { History } from './history';
+import type { SidecarFrame } from './sidecar-frame';
+import type { WindowAction, WindowState } from './preload-api';
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// A property of an IPC payload that arrived as `unknown`.
+function fieldOf(input: unknown, key: string): unknown {
+  if (typeof input !== 'object' || input === null) return undefined;
+  return Reflect.get(input, key);
+}
 
 // Windows groups taskbar buttons by AppUserModelID, and a pinned shortcut
 // carries the ID of whatever created it. Electron derives a default ID from
@@ -56,7 +71,7 @@ if (!fs.existsSync(USER_DATA) && fs.existsSync(OLD_USER_DATA)) {
   try {
     fs.renameSync(OLD_USER_DATA, USER_DATA);
   } catch (err) {
-    console.error('[main] old user data not moved:', err.message);
+    console.error('[main] old user data not moved:', errorMessage(err));
   }
 }
 app.setPath('userData', USER_DATA);
@@ -80,7 +95,7 @@ const INDEX_HTML = path.join(__dirname, 'web', 'index.html');
 // manifest is the same file that documents the repo's reference PNGs; only
 // its first two columns are read. CACHE_DIR is assigned in whenReady:
 // app.getPath needs a ready app, and nothing reads it earlier.
-let CACHE_DIR = null;
+let CACHE_DIR: string | null = null;
 const MANIFEST = path.join(__dirname, 'web', 'assets', 'SOURCES.tsv');
 const BUILD_WORKER = path.join(__dirname, 'assets', 'build-worker.js');
 const ICON_NAME = /^[A-Za-z0-9_.-]+\.png$/;
@@ -97,10 +112,11 @@ protocol.registerSchemesAsPrivileged([{
   privileges: { standard: true, secure: true, corsEnabled: true },
 }]);
 
-function serveAsset(request) {
+function serveAsset(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
   const name = decodeURIComponent(url.pathname.slice(1));
   if (url.hostname !== 'icons' || !ICON_NAME.test(name)) return new Response('', { status: 404 });
+  if (CACHE_DIR === null) return new Response('', { status: 404 });
   const file = path.join(CACHE_DIR, 'icons', name);
   if (!fs.existsSync(file)) return new Response('', { status: 404 });
   return net.fetch(pathToFileURL(file).href);
@@ -111,36 +127,37 @@ function serveAsset(request) {
 // Electron's sandboxed preload realm (webPreferences omits `sandbox`, which
 // defaults to true since Electron 20 per current docs), where `require` of
 // a local file throws and abandons the whole preload script before
-// contextBridge.exposeInMainWorld runs. main.js itself has no such
+// contextBridge.exposeInMainWorld runs. main.ts itself has no such
 // restriction, but the two need the exact same string, so it stays a
 // literal here too rather than the preload importing from main or a shared
 // module either way. ./sidecar.js deliberately does not carry these either:
 // centralising them anywhere is what the preload would then be tempted to
 // import from, and that is precisely the failure this comment exists for.
-// KEEP IN SYNC WITH app/preload.js's copy.
+// KEEP IN SYNC WITH app/preload.ts's copy.
 const STATE_CHANNEL = 'readout:state';
 const SIDECAR_DOWN_CHANNEL = 'readout:sidecar-down';
 const ASSETS_CHANNEL = 'readout:assets';
 const UPDATE_CHANNEL = 'readout:update';
 const HISTORY_CHANNEL = 'readout:history';
+const WINDOW_STATE_CHANNEL = 'readout:window-state';
 
-let mainWindow = null;
+let mainWindow: BrowserWindow | null = null;
 let rendererReady = false;
 
 // The launch check's result, kept rather than queued. Frames repaint a
 // reloaded page within a second, but the check runs once, so a result sent
 // through pendingSends would be gone after a reload (Ctrl+R stays bound by
 // the default menu). Sent when the check lands and on every page load.
-let updateInfo = null;
+let updateInfo: UpdateCheck | null = null;
 
 // SQLite run history, loaded at startup; each
 // complete capture is committed under its ID as a run finishes.
 // Sent whole on every page load and after each append: it is small, and a
 // whole list cannot be applied out of order the way a delta could.
-let HISTORY_PATH = null;
-let history = { runs: [], skipped: 0 };
+let HISTORY_PATH: string | null = null;
+let history: History = { runs: [], skipped: 0 };
 
-function sendHistory() {
+function sendHistory(): void {
   sendToRenderer(HISTORY_CHANNEL, history);
 }
 
@@ -151,15 +168,26 @@ const historyDeletion = new HistoryDeletion(() => history, (scope, ids) => {
     else deleteRuns(HISTORY_PATH, history, ids);
   } finally { sendHistory(); }
 });
-function historyRequest(event, action) {
-  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
-    || event.senderFrame !== mainWindow.webContents.mainFrame || event.senderFrame.url !== pathToFileURL(INDEX_HTML).href) {
+// True only for a call from this app's own page: the main window's webContents,
+// its top frame, at the index.html URL. Every IPC handler that does anything
+// checks this first.
+function senderIsMainWindow(event: IpcMainInvokeEvent): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const frame = event.senderFrame;
+  return event.sender === mainWindow.webContents
+    && frame !== null
+    && frame === mainWindow.webContents.mainFrame
+    && frame.url === pathToFileURL(INDEX_HTML).href;
+}
+
+function historyRequest<T extends object>(event: IpcMainInvokeEvent, action: () => T): ({ ok: true } & T) | { ok: false; error: string } {
+  if (!senderIsMainWindow(event)) {
     return { ok: false, error: 'History request denied.' };
   }
   try { return { ok: true, ...action() }; }
-  catch (error) { return { ok: false, error: error.message }; }
+  catch (error) { return { ok: false, error: errorMessage(error) }; }
 }
-let cachedTables = {};
+let cachedTables: unknown = {};
 const runSharer = new RunSharer({findRun:id=>history.runs.find(run=>run.id===id),tables:()=>cachedTables});
 ipcMain.handle('readout:share-run', async (event,input) => {
   const allowed = historyRequest(event,()=>({allowed:true}));
@@ -168,19 +196,19 @@ ipcMain.handle('readout:share-run', async (event,input) => {
 });
 
 ipcMain.handle('readout:history-delete-prepare', (event, input) => historyRequest(event, () => historyDeletion.prepare(input)));
-ipcMain.handle('readout:history-delete-confirm', (event, input) => historyRequest(event, () => historyDeletion.confirm(input?.token, input?.typed)));
+ipcMain.handle('readout:history-delete-confirm', (event, input) => historyRequest(event, () => historyDeletion.confirm(fieldOf(input, 'token'), fieldOf(input, 'typed'))));
 ipcMain.handle('readout:history-delete-cancel', (event, token) => historyRequest(event, () => { historyDeletion.cancel(token); return {}; }));
 
-function recordRun(frame) {
-  if (!frame.run_summary || HISTORY_PATH === null) return;
+function recordRun(frame: SidecarFrame): void {
+  if (!('run_summary' in frame) || !frame.run_summary || HISTORY_PATH === null) return;
   try {
     if (appendRun(HISTORY_PATH, history, frame.run_summary)) sendHistory();
   } catch (err) {
-    console.error('[main] run not saved to history:', err.message);
+    console.error('[main] run not saved to history:', errorMessage(err));
   }
 }
 
-function sendUpdate() {
+function sendUpdate(): void {
   if (updateInfo && mainWindow && !mainWindow.isDestroyed() && rendererReady) {
     mainWindow.webContents.send(UPDATE_CHANNEL, updateInfo);
   }
@@ -199,9 +227,9 @@ function sendUpdate() {
 // Map iteration order stays chronological -- if a down-notice follows a
 // frame, the flush must apply them in that order or the page ends up live
 // when the sidecar is gone.
-const pendingSends = new Map();
+const pendingSends = new Map<string, unknown>();
 
-function sendToRenderer(channel, payload) {
+function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
     mainWindow.webContents.send(channel, payload);
     return;
@@ -210,7 +238,7 @@ function sendToRenderer(channel, payload) {
   pendingSends.set(channel, payload);
 }
 
-function flushPendingSends() {
+function flushPendingSends(): void {
   if (!mainWindow || mainWindow.isDestroyed() || !rendererReady) return;
   for (const [channel, payload] of pendingSends) {
     mainWindow.webContents.send(channel, payload);
@@ -224,18 +252,19 @@ function flushPendingSends() {
 // it runs on a worker thread rather than stalling this one.
 let assetsBuilt = false;
 
-function maybeBuildAssets(frame) {
-  if (assetsBuilt || !frame.install_dir) return;
+function maybeBuildAssets(frame: SidecarFrame): void {
+  if (assetsBuilt || !('install_dir' in frame) || !frame.install_dir || CACHE_DIR === null) return;
   assetsBuilt = true;
   const worker = new Worker(BUILD_WORKER, {
     workerData: { installDir: frame.install_dir, cacheDir: CACHE_DIR, manifestPath: MANIFEST },
   });
-  worker.on('message', (msg) => {
-    if (msg.error) {
-      console.error('[main] icons and item text not decoded:', msg.error);
+  worker.on('message', (msg: unknown) => {
+    const error = fieldOf(msg, 'error');
+    if (error) {
+      console.error('[main] icons and item text not decoded:', error);
       return;
     }
-    cachedTables = msg.tables;
+    cachedTables = fieldOf(msg, 'tables');
     sendToRenderer(ASSETS_CHANNEL, cachedTables);
     console.log(`[main] icons and item text decoded from ${frame.install_dir}`);
   });
@@ -244,14 +273,15 @@ function maybeBuildAssets(frame) {
   });
 }
 
-function sendCachedTables() {
+function sendCachedTables(): void {
+  if (CACHE_DIR === null) return;
   const file = path.join(CACHE_DIR, 'tables.json');
   if (!fs.existsSync(file)) return;
   try {
     cachedTables = JSON.parse(fs.readFileSync(file, 'utf8'));
     sendToRenderer(ASSETS_CHANNEL, cachedTables);
   } catch (err) {
-    console.error('[main] cached item tables unreadable:', err.message);
+    console.error('[main] cached item tables unreadable:', errorMessage(err));
   }
 }
 
@@ -268,8 +298,52 @@ const sidecar = createSidecar({
   onDown: (notice) => { assetsBuilt = false; sendToRenderer(SIDECAR_DOWN_CHANNEL, notice); },
 });
 
-async function createWindow() {
-  mainWindow = new BrowserWindow({
+// The custom title bar on Windows: the OS draws only the min/max/close
+// buttons, as an overlay over the top `height` px of the page. The colours
+// are the header's (web/styles.css: .head sits on --ground and its text is
+// --neutral-100). 32 px is shorter than the 82 px header on purpose, so the
+// buttons sit at its top edge. Other platforms keep the standard frame.
+// KEEP IN SYNC WITH app/web/styles.css's --ground and --neutral-100.
+const TITLE_BAR_HEIGHT = 32;
+const WINDOW_CHROME: BrowserWindowConstructorOptions = process.platform === 'win32'
+  ? {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#131212', symbolColor: '#f8f4f4', height: TITLE_BAR_HEIGHT },
+  }
+  : {};
+
+function windowState(win: BrowserWindow): WindowState {
+  return { maximized: win.isMaximized(), focused: win.isFocused(), fullScreen: win.isFullScreen() };
+}
+
+function sendWindowState(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !rendererReady) return;
+  mainWindow.webContents.send(WINDOW_STATE_CHANNEL, windowState(mainWindow));
+}
+
+const WINDOW_ACTIONS: readonly WindowAction[] = ['minimize', 'toggle-maximize', 'close'];
+
+function isWindowAction(x: unknown): x is WindowAction {
+  return WINDOW_ACTIONS.some(action => action === x);
+}
+
+ipcMain.handle('readout:window-action', (event, action: unknown) => {
+  if (!senderIsMainWindow(event) || !mainWindow) return { ok: false, error: 'Window request denied.' };
+  if (!isWindowAction(action)) return { ok: false, error: 'Unknown window action.' };
+  if (action === 'minimize') mainWindow.minimize();
+  else if (action === 'close') mainWindow.close();
+  else if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+  return { ok: true };
+});
+
+ipcMain.handle('readout:window-get-state', (event) => {
+  if (!senderIsMainWindow(event) || !mainWindow) return { ok: false, error: 'Window request denied.' };
+  return { ok: true, state: windowState(mainWindow) };
+});
+
+async function createWindow(): Promise<void> {
+  const win = new BrowserWindow({
     // Sizes are the page's, not the frame's: 1280x800 is the design
     // artboard, and the minimum matches the .shell min-width/min-height in
     // web/styles.css, below which the page clips instead of scrolling.
@@ -287,14 +361,35 @@ async function createWindow() {
     // the bar keeps the accelerator (and leaves the menu one Alt press away)
     // while the window ships with no visible menu.
     autoHideMenuBar: true,
+    ...WINDOW_CHROME,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+  mainWindow = win;
 
-  mainWindow.on('closed', () => {
+  // The menu accelerator is not reliable on a hidden-title-bar window, so
+  // Ctrl+Shift+I is bound here as well. preventDefault keeps the menu from
+  // toggling a second time. Available in every build, exactly as the
+  // default menu's accelerator was.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && !input.alt && !input.meta
+      && input.key.toLowerCase() === 'i') {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+    }
+  });
+
+  win.on('maximize', sendWindowState);
+  win.on('unmaximize', sendWindowState);
+  win.on('focus', sendWindowState);
+  win.on('blur', sendWindowState);
+  win.on('enter-full-screen', sendWindowState);
+  win.on('leave-full-screen', sendWindowState);
+
+  win.on('closed', () => {
     mainWindow = null;
     rendererReady = false;
   });
@@ -302,7 +397,7 @@ async function createWindow() {
   // Every window.open / target=_blank is refused; the few hosts in
   // external-links.js go to the system browser instead. Without this a
   // target=_blank link opens a second Electron window.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternal(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -313,21 +408,22 @@ async function createWindow() {
   // what makes a flushed frame land on a subscribed page rather than
   // vanishing the same way the dropped ones did. Fires again on a reload,
   // which is why the flag is set here rather than once at startup.
-  mainWindow.webContents.on('did-start-loading', () => {
+  win.webContents.on('did-start-loading', () => {
     rendererReady = false;
   });
-  mainWindow.webContents.on('did-finish-load', () => {
+  win.webContents.on('did-finish-load', () => {
     rendererReady = true;
     flushPendingSends();
     sendUpdate();
     sendHistory();
     sendToRenderer(ASSETS_CHANNEL, cachedTables);
+    sendWindowState();
   });
 
   // loadFile() resolves relative paths against the app root (app/), and
   // app/web/index.html may sit outside the cwd -- pathToFileURL().href sidesteps
   // that ambiguity with a plain, unambiguous file:// URL for loadURL().
-  await mainWindow.loadURL(pathToFileURL(INDEX_HTML).href);
+  await win.loadURL(pathToFileURL(INDEX_HTML).href);
 }
 
 // Single-instance lock: called as early as possible, before anything else
@@ -360,7 +456,7 @@ if (!gotLock) {
     try {
       history = loadHistory(HISTORY_PATH);
     } catch (err) {
-      console.error('[main] run history unreadable:', err.message);
+      console.error('[main] run history unreadable:', errorMessage(err));
     }
     protocol.handle('asset', serveAsset);
     sendCachedTables();

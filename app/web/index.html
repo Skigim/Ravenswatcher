@@ -34,8 +34,8 @@
            live readout keeps painting underneath, so switching back shows the
            current frame rather than waiting for the next. -->
       <div class="tabs" role="tablist" aria-label="View">
-        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="false" aria-controls="live-view">Live</button>
-        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="true" aria-controls="history">History</button>
+        <button class="tab" id="tab-live" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="live-view">Live</button>
+        <button class="tab" id="tab-history" type="button" role="tab" aria-selected="true" tabindex="0" aria-controls="history">History</button>
       </div>
       <div class="head-right" id="head-right"></div>
       <!-- Same box as the gear, but a link: it leaves the window for the
@@ -96,7 +96,7 @@
 
   <div class="rule rule-seam"></div>
 
-  <main class="body" id="live-view">
+  <main class="body" id="live-view" role="tabpanel" aria-labelledby="tab-live">
     <div class="shop" id="shop">
       <div class="shop-head">
         <div class="kicker-row">

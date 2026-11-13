@@ -14,19 +14,27 @@ The shell runs `app/reader/stdio.js` using Electron's own Node runtime with
 `ELECTRON_RUN_AS_NODE=1`. The sidecar sends JSON frames over stdout; nothing
 listens on a port. There is no separate Python interpreter in the application.
 
+On Windows the window uses a hidden title bar with a 32 px native button
+overlay; elsewhere it keeps the standard frame. The page reaches the window only
+through `window.ravenswatch`: `windowAction('minimize' | 'toggle-maximize' |
+'close')`, `getWindowState()` and `onWindowState(cb)`. `main.ts` rejects any
+call whose sender is not the main window's top frame at `index.html`, and any
+unknown action string, and pushes `{ maximized, focused, fullScreen }` on
+maximize, unmaximize, focus, blur and full-screen changes.
+
 Paths below are relative to `app/`:
 
 ```text
-main.js              Electron lifecycle, IPC, asset:// protocol
-lifecycle.js         cooperative shutdown and relaunch coordination
-sidecar.js           reader supervision and JSON frame transport
-preload.js           isolated renderer subscriptions and requests
+main.ts              Electron lifecycle, IPC, asset:// protocol
+lifecycle.ts         cooperative shutdown and relaunch coordination
+sidecar.ts           reader supervision and JSON frame transport
+preload.ts           isolated renderer subscriptions and requests
 history.ts           SQLite run persistence and deletion confirmations
 history-record.ts    validates one stored row for analytics (nulls stay null)
 sidecar-frame.ts     sidecar stdout frame types and runtime guard
 preload-api.ts       typed shape of window.ravenswatch (types only)
 share.ts             saved-run image generation and clipboard sharing
-update.js            once-per-launch GitHub release check
+update.ts            once-per-launch GitHub release check
 reader/              read-only Windows process reader and workers
   worker-messages.ts  typed parent/worker message unions (types only)
 assets/              runtime resource decoders
@@ -59,7 +67,7 @@ retains its SIL Open Font License.
 ## Reader output
 
 A fixed-size JSON object, one line per poll on stdout — the contract
-`app/sidecar.js` parses. `test-stdio` asserts the key count, so a field
+`app/sidecar.ts` parses. `test-stdio` asserts the key count, so a field
 added to `readState` without updating that assertion fails the suite.
 
 ## Reader layout

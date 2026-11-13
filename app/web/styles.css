@@ -166,6 +166,28 @@ body {
 
 .head-right { display: flex; align-items: center; gap: 2px; }
 
+/* The header is the title bar: blank space drags the window, and everything
+   interactive opts back out (a drag region swallows clicks). The scrim is
+   fixed over the whole window while settings is open, so it opts out too, or
+   it would leave the header draggable-but-dead under it. */
+.head { -webkit-app-region: drag; }
+.tab, .gear, .status, .head-right, .settings, .settings-scrim, .update-bar { -webkit-app-region: no-drag; }
+
+/* Windows draws native caption buttons over the top-right (titleBarOverlay).
+   env() reports where they start; the fallback covers a runtime that does not
+   expose it. Other platforms keep the OS frame and need no extra room. */
+.platform-win32 .head {
+  padding-right: calc(var(--pad) + 140px);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 140px)) + var(--pad));
+}
+
+/* Unfocused window: mute the header like a native title bar does. */
+.window-inactive .head .wordmark,
+.window-inactive .head .kicker,
+.window-inactive .head .tab,
+.window-inactive .head .gear { opacity: 0.55; }
+.window-inactive .head .brand-rule { opacity: 0.6; }
+
 /* A quiet connection dot. Names and failure details live in its tooltip. */
 .status { display: grid; place-items: center; width: 28px; height: 36px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-600); }
@@ -1045,6 +1067,9 @@ body {
 }
 .tab:hover { color: var(--neutral-100); }
 .tab:focus-visible { outline: 2px solid var(--accent-400); outline-offset: -2px; }
+/* A tab in the selected state keeps a visible ring when reached by keyboard:
+   the accent fill alone would hide an accent outline. */
+.tab[aria-selected="true"]:focus-visible { outline-color: var(--ground); }
 .tab[aria-selected="true"] {
   background: var(--accent-500);
   border-color: var(--accent-500);

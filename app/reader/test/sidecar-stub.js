@@ -9,6 +9,17 @@ process.stdin.on('data', () => {});
 process.stdin.on('end', () => { if (mode !== 'ignore-stop') process.exit(0); });
 process.stdin.resume();
 
+// The supervisor forwards only lines that pass sidecar-frame's state-frame
+// check, so every stub frame carries the full field set; `extra` rides along.
+function frame(extra) {
+  return JSON.stringify({
+    no_run: true, ready: false, coop: false, process: 'stub', sweeps: 0,
+    poll_ms: 0, sweep_interval: 0, level: null, in_combat: null, map_id: null,
+    pid: process.pid, dream_shards: null, melodies: null, sandman: null,
+    tiles: null, run_summary: null, ...extra,
+  }) + '\n';
+}
+
 if (mode === 'fail') {
   process.stderr.write('stub child failure\n');
   process.exit(1);
@@ -26,7 +37,7 @@ if (mode === 'fail') {
     process.stderr.write('stub first failure\n');
     process.exit(1);
   } else {
-    process.stdout.write(JSON.stringify({ state: 'recovered', pid: process.pid, count }) + '\n');
+    process.stdout.write(frame({ state: 'recovered', count }));
     // Keep alive until killed
     setInterval(() => {}, 60000);
   }
@@ -44,11 +55,11 @@ if (mode === 'fail') {
     process.stderr.write('stub initial failure for timer test\n');
     process.exit(1);
   } else {
-    process.stdout.write(JSON.stringify({ pid: process.pid, count }) + '\n');
+    process.stdout.write(frame({ count }));
     setInterval(() => {}, 60000);
   }
 } else if (mode === 'stay' || mode === 'ignore-stop') {
-  process.stdout.write(JSON.stringify({ pid: process.pid, ok: true }) + '\n');
+  process.stdout.write(frame({ ok: true }));
   setInterval(() => {}, 60000);
 } else {
   process.exit(0);

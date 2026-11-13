@@ -11,15 +11,19 @@
 // means this file can be exercised by a plain `node` script with no Electron
 // runtime at all, which is how the failed-spawn path gets tested.
 
-const { spawn, execFileSync } = require('child_process');
-const path = require('path');
+import { spawn, execFileSync } from 'child_process';
+import type { ChildProcess } from 'child_process';
+import * as path from 'path';
+import { parseSidecarLine } from './sidecar-frame';
+import type { SidecarFrame } from './sidecar-frame';
+import type { SidecarDownNotice } from './preload-api';
 
 // Restart policy: automatic retry with backoff. Doubles from BASE_RETRY_MS
 // up to MAX_RETRY_MS on each consecutive failure; resets the moment the
 // sidecar proves it's alive by writing anything to stdout.
-const BASE_RETRY_MS = 2000;
-const MAX_RETRY_MS = 30000;
-const SHUTDOWN_GRACE_MS = 30000;
+export const BASE_RETRY_MS = 2000;
+export const MAX_RETRY_MS = 30000;
+export const SHUTDOWN_GRACE_MS = 30000;
 
 // The reader exits with this when the game is simply not there -- it has not
 // been started yet, or it was running and the player closed it. That is not a
@@ -27,13 +31,17 @@ const SHUTDOWN_GRACE_MS = 30000;
 // the app can sit for half a minute after the game is back before it notices.
 // Every other non-zero exit backs off.
 // KEEP IN SYNC WITH app/reader/stdio.js's EXIT_NO_GAME.
-const EXIT_NO_GAME = 3;
+export const EXIT_NO_GAME = 3;
 
 // Cap on how much stderr text we hold onto for the "down" message -- the
 // sidecar only ever writes a couple of short lines (the attach banner, or a
 // one-line fatal message), but this keeps a runaway stack trace from an
 // unanticipated crash out of the renderer payload.
-const STDERR_TAIL_LIMIT = 4000;
+export const STDERR_TAIL_LIMIT = 4000;
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 // Kills the sidecar's whole process tree, not just the direct child.
 //
@@ -44,7 +52,7 @@ const STDERR_TAIL_LIMIT = 4000;
 // to guard against with no known path to it.
 //
 // The fallback also serves fatal app exits, where an asynchronous kill could race exit.
-function killSidecarTree(proc) {
+export function killSidecarTree(proc: ChildProcess | null): void {
   if (!proc || proc.pid == null) return;
   try {
     execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
@@ -55,7 +63,7 @@ function killSidecarTree(proc) {
   } catch (err) {
     // Non-zero exit (process already gone), timeout, or taskkill missing
     // from PATH all land here -- proc.kill() below is the fallback.
-    console.error('[sidecar] taskkill failed:', err.message);
+    console.error('[sidecar] taskkill failed:', errorMessage(err));
   }
   // Best-effort direct signal too, in case taskkill itself couldn't run
   // (missing from PATH, permissions) -- harmless if taskkill already won.
@@ -84,7 +92,23 @@ function killSidecarTree(proc) {
 //   or never started at all) and a retry has been scheduled.
 // Both are called with no `this`, may be omitted, and are the only way
 // anything leaves this module.
-function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, readerEntry, shutdownGraceMs = SHUTDOWN_GRACE_MS }) {
+export interface SidecarOptions {
+  packaged: boolean;
+  resourcesPath: string;
+  repoRoot: string;
+  onFrame?: (frame: SidecarFrame) => void;
+  onDown?: (notice: SidecarDownNotice) => void;
+  readerEntry?: string;
+  shutdownGraceMs?: number;
+}
+
+export interface Sidecar {
+  start(): void;
+  stop(): Promise<void>;
+  forceStop(): void;
+}
+
+export function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, readerEntry, shutdownGraceMs = SHUTDOWN_GRACE_MS }: SidecarOptions): Sidecar {
   // Two layouts, one spawn. The reader is plain JS running on the Node
   // runtime Electron already ships, so there is no second interpreter to
   // locate: process.execPath IS the command in both layouts, with
@@ -104,16 +128,16 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     || path.join(__dirname, 'value_types.json');
   const GEN_ROOT = process.env.RAVENSWATCH_GEN_ROOT || null;
 
-  let proc = null;
+  let proc: ChildProcess | null = null;
   let stdoutBuffer = '';
   let stderrTail = '';
   let stopped = false;         // true once stop() has been called; suppresses retry
-  let stopPromise = null;
-  let shutdownTimer = null;
-  let retryTimer = null;
+  let stopPromise: Promise<void> | null = null;
+  let shutdownTimer: NodeJS.Timeout | null = null;
+  let retryTimer: NodeJS.Timeout | null = null;
   let retryAttempt = 0;
 
-  function start() {
+  function start(): void {
     if (proc) throw new Error("Wait for the previous reader to close before restarting.");
     stopPromise = null;
     // Reset stopped and cancel any pending retry timer before spawning.
@@ -151,23 +175,24 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     const command = process.execPath;
     const commandArgs = [READER_ENTRY];
 
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1',
+    const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1',
                   RAVENSWATCH_VALUE_TYPES: VALUE_TYPES_JSON };
     if (GEN_ROOT) env.RAVENSWATCH_GEN_ROOT = GEN_ROOT;
 
     // windowsHide is kept even though the Node reader has no console of its
     // own to show: process.execPath is a GUI-subsystem binary here, and the
     // flag costs nothing while covering any future change of command.
-    proc = spawn(
+    const child = spawn(
       command,
       commandArgs,
       { cwd: packaged ? resourcesPath : repoRoot,
         stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env }
     );
+    proc = child;
 
-    proc.stdout.on('data', handleSidecarStdout);
-    proc.stderr.on('data', handleSidecarStderr);
-    proc.on('error', (err) => {
+    child.stdout.on('data', handleSidecarStdout);
+    child.stderr.on('data', handleSidecarStderr);
+    child.on('error', (err) => {
       console.error('[sidecar] failed to start:', err);
       if (!stderrTail) stderrTail = `failed to launch ${command}: ${err.message}`;
     });
@@ -179,15 +204,15 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     // forever on index.html's static markup and looks like a healthy app
     // waiting on its first sweep. 'close' fires for
     // both that case and a normal exit, and carries the same (code, signal).
-    proc.stdin.on('error', () => {}); // EOF may race a child that already exited.
-    proc.on('close', handleSidecarExit);
+    child.stdin.on('error', () => {}); // EOF may race a child that already exited.
+    child.on('close', handleSidecarExit);
   }
 
   // The reader's stdio.js writes one JSON object per line, but Node
   // hands stdout to us as arbitrary chunks -- a line can arrive split across
   // two 'data' events, or one chunk can carry several lines. Buffer text
   // until a newline shows up and only ever parse complete lines.
-  function handleSidecarStdout(chunk) {
+  function handleSidecarStdout(chunk: Buffer): void {
     if (stopped) return;
     // Any stdout at all is proof the sidecar attached successfully. Forget
     // the backoff history so a later, unrelated failure starts counting from
@@ -203,14 +228,11 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
       stdoutBuffer = stdoutBuffer.slice(newlineAt + 1);
       if (!line.trim()) continue;
 
-      let frame;
-      try {
-        frame = JSON.parse(line);
-      } catch (err) {
-        // The line itself, not just the parser's complaint -- "Unexpected
-        // token" says nothing about which frame broke or how. Truncated
+      const frame = parseSidecarLine(line);
+      if (frame === null) {
+        // The line itself, so the log says which frame broke. Truncated
         // because a runaway line shouldn't flood the log.
-        console.error('[sidecar] unparseable state line:', err.message,
+        console.error('[sidecar] unparseable state line:',
           '| line:', JSON.stringify(line.slice(0, 400)));
         continue;
       }
@@ -229,12 +251,12 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
   // to our own stderr. It's also the only place the reader's fatal message
   // (for example the "not running" line) ever appears, so the tail is kept to
   // hand to the renderer if the process then exits.
-  function handleSidecarStderr(chunk) {
+  function handleSidecarStderr(chunk: Buffer): void {
     process.stderr.write(`[sidecar] ${chunk}`);
     stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_LIMIT);
   }
 
-  function handleSidecarExit(code, signal) {
+  function handleSidecarExit(code: number | null, signal: NodeJS.Signals | null): void {
     console.log(`[sidecar] exited (code=${code}, signal=${signal})`);
     proc = null;
     if (shutdownTimer) clearTimeout(shutdownTimer);
@@ -269,7 +291,7 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
 
   // Holds until the next start(): `stopped` suppresses the retry that the
   // exit handler would otherwise schedule.
-  function stop() {
+  function stop(): Promise<void> {
     stopped = true;
     if (retryTimer) {
       clearTimeout(retryTimer);
@@ -278,18 +300,18 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
     if (stopPromise) return stopPromise;
     if (!proc) return (stopPromise = Promise.resolve());
     const target = proc;
-    stopPromise = new Promise(resolve => {
+    stopPromise = new Promise<void>(resolve => {
       target.once('close', () => resolve());
       shutdownTimer = setTimeout(() => {
         console.error('[sidecar] graceful shutdown timed out; stopping reader process');
         killSidecarTree(target);
       }, shutdownGraceMs);
-      target.stdin.end();
+      target.stdin?.end();
     });
     return stopPromise;
   }
 
-  function forceStop() {
+  function forceStop(): void {
     stopped = true;
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = null;
@@ -300,13 +322,3 @@ function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDown, rea
 
   return { start, stop, forceStop };
 }
-
-module.exports = {
-  createSidecar,
-  killSidecarTree,
-  EXIT_NO_GAME,
-  BASE_RETRY_MS,
-  MAX_RETRY_MS,
-  SHUTDOWN_GRACE_MS,
-  STDERR_TAIL_LIMIT,
-};

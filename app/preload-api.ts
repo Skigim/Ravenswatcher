@@ -1,5 +1,5 @@
 // The API app/preload.js exposes to the page as window.ravenswatch. Types only:
-// the shell and renderer ports can adopt it; preload.js itself is unchanged.
+// preload.ts implements it and the renderer consumes it.
 // Channel names stay inlined in preload.js and main.js (a sandboxed preload
 // cannot require a shared module), so they are deliberately not exported here.
 import type { StoredRun } from './history';
@@ -69,7 +69,23 @@ export type ConfirmHistoryDeletionResult =
 
 export type CancelHistoryDeletionResult = { ok: true } | IpcFailure;
 
+/** What the page may ask the main window to do. Anything else is refused. */
+export type WindowAction = 'minimize' | 'toggle-maximize' | 'close';
+
+/** The window state the custom title bar styles itself from. */
+export interface WindowState {
+  readonly maximized: boolean;
+  readonly focused: boolean;
+  readonly fullScreen: boolean;
+}
+
+export type WindowActionResult = { ok: true } | IpcFailure;
+
+export type WindowStateResult = { ok: true; state: WindowState } | IpcFailure;
+
 export interface RavenswatchApi {
+  /** process.platform of the shell, e.g. 'win32'. */
+  platform: string;
   /** Once per frame the reader wrote to stdout. */
   onState: Subscribe<SidecarFrame>;
   onSidecarDown: Subscribe<SidecarDownNotice>;
@@ -81,4 +97,9 @@ export interface RavenswatchApi {
   prepareHistoryDeletion(input: HistoryDeletionRequest): Promise<PrepareHistoryDeletionResult>;
   confirmHistoryDeletion(input: ConfirmHistoryDeletionRequest): Promise<ConfirmHistoryDeletionResult>;
   cancelHistoryDeletion(token: string): Promise<CancelHistoryDeletionResult>;
+  /** Rejected with { ok: false } for an unknown action or a sender that is not the main window. */
+  windowAction(action: WindowAction): Promise<WindowActionResult>;
+  getWindowState(): Promise<WindowStateResult>;
+  /** Fires on maximize, unmaximize, focus, blur and entering or leaving full screen. */
+  onWindowState: Subscribe<WindowState>;
 }

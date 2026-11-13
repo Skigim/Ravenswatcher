@@ -1,12 +1,26 @@
 'use strict';
 
 // Keep a second launch from disappearing while the first instance drains its reader.
-function createLifecycle({ stop, quit, relaunch, focus, onError = console.error }) {
+
+export interface LifecycleOptions {
+  stop: () => unknown;
+  quit: () => void;
+  relaunch: () => void;
+  focus: () => void;
+  onError?: (error: unknown) => void;
+}
+
+export interface Lifecycle {
+  beforeQuit(event: { preventDefault(): void }): Promise<void> | undefined;
+  secondInstance(): void;
+}
+
+export function createLifecycle({ stop, quit, relaunch, focus, onError = console.error }: LifecycleOptions): Lifecycle {
   let closing = false;
   let readyToQuit = false;
   let relaunchRequested = false;
   let relaunchScheduled = false;
-  let shutdown = null;
+  let shutdown: Promise<void> | null = null;
   const scheduleRelaunch = () => {
     if (relaunchRequested && !relaunchScheduled) {
       relaunchScheduled = true;
@@ -34,5 +48,3 @@ function createLifecycle({ stop, quit, relaunch, focus, onError = console.error 
     },
   };
 }
-
-module.exports = { createLifecycle };

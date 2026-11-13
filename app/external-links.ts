@@ -14,10 +14,8 @@
 const EXTERNAL_HOSTS = new Set(['ko-fi.com', 'www.ko-fi.com', 'github.com', 'www.github.com']);
 
 /** True when `url` is an https link to a host the window may open. */
-function isAllowedExternal(url) {
-  let u;
+export function isAllowedExternal(url: string): boolean {
+  let u: URL;
   try { u = new URL(url); } catch { return false; }
   return u.protocol === 'https:' && EXTERNAL_HOSTS.has(u.hostname);
 }
-
-module.exports = { isAllowedExternal };

@@ -1514,6 +1514,8 @@ function setView(next) {
   el("history").hidden = !history;
   el("tab-live").setAttribute("aria-selected", String(!history));
   el("tab-history").setAttribute("aria-selected", String(history));
+  el("tab-live").tabIndex = history ? -1 : 0;
+  el("tab-history").tabIndex = history ? 0 : -1;
   hideTip();
 }
 
@@ -1711,6 +1713,22 @@ function initHistoryDeletion() {
 function initHistory() {
   el("tab-live").addEventListener("click", () => setView("live"));
   el("tab-history").addEventListener("click", () => setView("history"));
+  // Arrow keys move between the two view tabs and activate, as the run-detail
+  // tabs do; roving tabindex is kept by setView().
+  const viewTabs = ["live", "history"];
+  viewTabs.forEach((name, i) => {
+    el(`tab-${name}`).addEventListener("keydown", event => {
+      let next;
+      if (event.key === "ArrowRight") next = (i + 1) % viewTabs.length;
+      else if (event.key === "ArrowLeft") next = (i + viewTabs.length - 1) % viewTabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = viewTabs.length - 1;
+      else return;
+      event.preventDefault();
+      setView(viewTabs[next]);
+      el(`tab-${viewTabs[next]}`).focus();
+    });
+  });
   renderHistory();
   setView("history");
 }
@@ -1751,3 +1769,28 @@ if (ELECTRON_TRANSPORT) {
 } else {
   renderNoTransport();
 }
+
+// Title bar chrome. Feature-detected: a page without these bridge members
+// (or without a bridge at all) just keeps the plain header.
+function initWindowChrome() {
+  const bridge = window.ravenswatch;
+  if (!bridge) return;
+  if (typeof bridge.platform === "string") {
+    document.documentElement.classList.add(`platform-${bridge.platform}`);
+  }
+  const apply = state => {
+    if (!state || typeof state !== "object") return;
+    const root = document.documentElement.classList;
+    root.toggle("window-inactive", state.focused === false);
+    root.toggle("window-maximized", !!state.maximized);
+    root.toggle("window-fullscreen", !!state.fullScreen);
+  };
+  if (typeof bridge.getWindowState === "function") {
+    Promise.resolve(bridge.getWindowState()).then(reply => {
+      // preload-api.ts: { ok: true, state } or { ok: false, error }.
+      if (reply && reply.ok === true) apply(reply.state);
+    }).catch(() => {});
+  }
+  if (typeof bridge.onWindowState === "function") bridge.onWindowState(apply);
+}
+initWindowChrome();
