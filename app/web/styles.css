@@ -171,15 +171,33 @@ body {
    fixed over the whole window while settings is open, so it opts out too, or
    it would leave the header draggable-but-dead under it. */
 .head { -webkit-app-region: drag; }
-.tab, .gear, .status, .head-right, .settings, .settings-scrim, .update-bar { -webkit-app-region: no-drag; }
+/* The header's controls use `all: unset` further down, which also resets
+   -webkit-app-region, so these selectors must out-rank a single class. */
+.head :is(a, button, [role="tab"], .tab, .gear, .status, .head-right),
+.settings, .settings-scrim, .update-bar { -webkit-app-region: no-drag; }
 
-/* Windows draws native caption buttons over the top-right (titleBarOverlay).
-   env() reports where they start; the fallback covers a runtime that does not
-   expose it. Other platforms keep the OS frame and need no extra room. */
+/* Windows draws native caption buttons in a 16 px strip across the top
+   (titleBarOverlay, TITLE_BAR_HEIGHT in main.ts). The header grows by that
+   strip and pads its content below it, so the header itself looks as it did
+   under the OS frame; the strip drags like the rest of the header. The
+   connection dot moves up into the strip, just left of the caption buttons.
+   env() reports where those buttons start, with a fallback for a runtime
+   that does not expose it. Other platforms keep the OS frame and this layout
+   does not apply. */
+.platform-win32 { --title-h: 16px; }
 .platform-win32 .head {
-  padding-right: calc(var(--pad) + 140px);
-  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 140px)) + var(--pad));
+  position: relative;
+  height: calc(var(--head-h) + var(--title-h));
+  padding-top: var(--title-h);
 }
+.platform-win32 .head-right {
+  position: absolute;
+  top: 0;
+  height: var(--title-h);
+  right: 138px;
+  right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 6px);
+}
+.platform-win32 .head-right .status { height: var(--title-h); }
 
 /* Unfocused window: mute the header like a native title bar does. */
 .window-inactive .head .wordmark,
@@ -234,7 +252,7 @@ body {
    element's overflow: hidden. */
 .settings {
   position: fixed;
-  top: calc(var(--head-h) + 2px);
+  top: calc(var(--head-h) + var(--title-h, 0px) + 2px);
   right: var(--pad);
   width: 320px;
   background: var(--surface);

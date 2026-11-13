@@ -301,10 +301,11 @@ const sidecar = createSidecar({
 // The custom title bar on Windows: the OS draws only the min/max/close
 // buttons, as an overlay over the top `height` px of the page. The colours
 // are the header's (web/styles.css: .head sits on --ground and its text is
-// --neutral-100). 32 px is shorter than the 82 px header on purpose, so the
-// buttons sit at its top edge. Other platforms keep the standard frame.
-// KEEP IN SYNC WITH app/web/styles.css's --ground and --neutral-100.
-const TITLE_BAR_HEIGHT = 32;
+// --neutral-100). The page reserves this strip above the 82 px header, so
+// the header looks as it did under the OS frame. Other platforms keep the
+// standard frame. KEEP IN SYNC WITH app/web/styles.css's --ground,
+// --neutral-100 and --title-h.
+const TITLE_BAR_HEIGHT = 16;
 const WINDOW_CHROME: BrowserWindowConstructorOptions = process.platform === 'win32'
   ? {
     titleBarStyle: 'hidden',
