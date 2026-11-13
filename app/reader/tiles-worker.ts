@@ -21,6 +21,7 @@
 import { parentPort, workerData, isMainThread } from 'worker_threads';
 import * as tiles from './tiles';
 import type { PlacedTile, TilesVtables, TilesSource } from './tiles';
+import type { TilesWorkerInbound, TilesWorkerOutbound } from './worker-messages';
 
 // win32.js is still JavaScript; require it directly.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -35,14 +36,11 @@ interface WorkerProcess extends TilesSource {
 }
 
 /** What Reader (or a test) posts to this worker. */
-export type TilesWorkerMessage =
-  | { type: 'map'; mapId: number | null; reset?: boolean }
-  | { type: 'clear' }
-  | { type: 'stop' };
+export type TilesWorkerMessage = TilesWorkerInbound;
 
 /** The half of a MessagePort this worker uses; a test can pass its own. */
 export interface TilesPort {
-  postMessage(value: unknown): void;
+  postMessage(value: TilesWorkerOutbound): void;
   on(event: 'message', listener: (value: TilesWorkerMessage) => void): void;
   unref?(): void;
 }

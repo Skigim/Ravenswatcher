@@ -53,9 +53,28 @@
 /app/reader/worker-control.js
 /app/reader/worker-control.js.map
 /app/reader/worker-control.d.ts
+/app/reader/scratch.js
+/app/reader/scratch.js.map
+/app/reader/scratch.d.ts
+/app/reader/process.js
+/app/reader/process.js.map
+/app/reader/process.d.ts
 /app/history.js
 /app/history.js.map
 /app/history.d.ts
+
+/app/reader/worker-messages.js
+/app/reader/worker-messages.js.map
+/app/reader/worker-messages.d.ts
+/app/sidecar-frame.js
+/app/sidecar-frame.js.map
+/app/sidecar-frame.d.ts
+/app/preload-api.js
+/app/preload-api.js.map
+/app/preload-api.d.ts
+/app/history-record.js
+/app/history-record.js.map
+/app/history-record.d.ts
 
 # app/assets is TypeScript throughout, so its compiled output can be globbed.
 /app/assets/*.js

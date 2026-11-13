@@ -16,9 +16,9 @@ import * as runs from './runs';
 import type { ClassOf, RunResult, RunSummary } from './runs';
 import { pollBinding } from './values';
 import { WorkerControl } from './worker-control';
+import type { RunsWorkerInbound, RunsWorkerOutbound, ValueBinding } from './worker-messages';
 import type { ByteSource } from './pe';
 import type { ScanSource } from './scan';
-import type { MelodySlotView } from './melodies';
 import * as rtti from './rtti';
 import { scanPointers } from './scan';
 import { CURRENT_MAP_ID } from './state';
@@ -39,13 +39,9 @@ interface WorkerProcess extends ByteSource, ScanSource {
   close(): void;
 }
 
-export interface ValueBinding { addr: number; variant: string | null; is_float: boolean }
+export type { ValueBinding };
 
-/** What Reader posts to this worker: the bindings of the values it polls. */
-type RunsWorkerMessage = { type: 'values'; bindings: Record<string, ValueBinding> }
-  | { type: 'melodies'; melodies: MelodySlotView[] | null; mapId: number | null; reset?: boolean };
-
-function post(m: unknown): void {
+function post(m: RunsWorkerOutbound): void {
   if (parentPort) parentPort.postMessage(m);
 }
 
@@ -105,7 +101,7 @@ export async function runWorker(pid: number, base: number): Promise<void> {
   let lastTalentRead = 0;
   let lastTalentFind = 0;
   if (parentPort) {
-    parentPort.on('message', (m: RunsWorkerMessage) => {
+    parentPort.on('message', (m: RunsWorkerInbound) => {
       if (m && m.type === 'values') bindings = m.bindings;
       if (m && m.type === 'melodies') {
         const startsRun = m.mapId !== null && m.mapId >= 0 && (m.reset || melodySnapshot.outsideRun);
