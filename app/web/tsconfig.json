@@ -1,0 +1,35 @@
+{
+  // The renderer: scripts the browser loads with <script src>. They are classic
+  // scripts, not modules, so this config emits no exports/require; a file here
+  // must not use import/export. DOM types, and no Node types, on purpose: a
+  // stray `process` or `Buffer` in page code should fail the build.
+  //
+  // Emitted in place beside each source, for the same reasons as ../tsconfig.json
+  // (no outDir). The root config excludes web/ and this one covers it.
+  //
+  // Page code reaches the shell only through window.ravenswatch, typed from
+  // ../preload-api.ts by globals.d.ts. That file imports Node-only modules, so
+  // this project REFERENCES the root one: it reads the root's emitted .d.ts
+  // instead of compiling those sources against DOM-only types. Run the root
+  // `tsc` first (the build and typecheck scripts do).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // legacy: a file with no import/export is a script and gets no exports
+    // preamble. The default treats every file as a module under node16.
+    "moduleDetection": "legacy",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "strict": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "types": []
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": ".." }],
+  "exclude": ["node_modules"]
+}

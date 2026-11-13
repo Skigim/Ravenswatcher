@@ -1,9 +1,13 @@
 /* Dedicated image renderer. All saved text enters through textContent. */
+// Everything lives in an IIFE so the helper names (node, art, ...) do not join
+// the renderer program's shared global scope; only renderShare is published,
+// because the main process calls it by name through executeJavaScript.
+(function () {
 "use strict";
 
 const P = RunPresentation;
 
-const RARITY = {
+const RARITY: Record<string, string> = {
   Common: "#b4b7b4",
   Rare: "#48a9df",
   Epic: "#ba89de",
@@ -12,14 +16,14 @@ const RARITY = {
   Cursed: "#d35b61",
 };
 
-const DIFFICULTIES = {
+const DIFFICULTIES: Record<number, string> = {
   0: "Adventure",
   1: "Twilight",
   2: "Darkness",
   3: "Nightmare",
 };
 
-const DAMAGE = [
+const DAMAGE: [string, string][] = [
   ["attack", "Attack"],
   ["power", "Power"],
   ["special", "Special"],
@@ -30,14 +34,18 @@ const DAMAGE = [
   ["other", "Other"],
 ];
 
-function node(tag, cls, text) {
+function node<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls?: string,
+  text?: unknown,
+): HTMLElementTagNameMap[K] {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = String(text);
   return n;
 }
 
-function art(name, cls = "") {
+function art(name?: string | null, cls = ""): HTMLElement {
   const box = node("span", `art ${cls}`);
   const image = node("img");
   image.alt = "";
@@ -51,19 +59,26 @@ function art(name, cls = "") {
   return box;
 }
 
-function heading(text) {
+function heading(text: string): HTMLElement {
   const wrap = node("div", "section-heading");
   wrap.appendChild(node("h2", "", text));
   return wrap;
 }
 
-function known(value) {
+function known(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-async function renderShare({ run, tables = {}, stylizedFonts = true }) {
+function lookup<T>(table: Record<string, T> | undefined, key: string | number | null | undefined): T | undefined {
+  return key === null || key === undefined ? undefined : table?.[key];
+}
+
+async function renderShare(
+  { run, tables = {}, stylizedFonts = true }: ShareInput,
+): Promise<{ width: number; height: number }> {
   document.body.classList.toggle("stylized-fonts", stylizedFonts);
   const root = document.getElementById("share-card");
+  if (!root) throw new Error("share-card missing");
   root.replaceChildren();
   root.className = "card " + (run.result === "victory" ? "victory" : "defeat");
 
@@ -75,9 +90,9 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
   identity.append(node("div", "eyebrow", run.result === "victory" ? "VICTORY" : "DEFEAT"), h1);
 
   const context = node("div", "context");
-  context.append(art(tables.DIFFICULTY_ICONS?.[run.difficulty], "difficulty"));
+  context.append(art(lookup(tables.DIFFICULTY_ICONS, run.difficulty), "difficulty"));
   const contextLabels = [
-    DIFFICULTIES[run.difficulty] || "Difficulty unavailable",
+    (run.difficulty === null || run.difficulty === undefined ? undefined : DIFFICULTIES[run.difficulty]) || "Difficulty unavailable",
     P.stageName(run.map_name) || "Stage unavailable",
     P.formatPlaytime(run.playtime_s),
   ];
@@ -92,7 +107,7 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
     node("div", "caption", "TOTAL SCORE"),
     node("div", "value", P.formatStat(run.score?.total)),
   );
-  header.append(art(tables.HERO_ICONS?.[code], "hero-art"), identity, score);
+  header.append(art(lookup(tables.HERO_ICONS, code), "hero-art"), identity, score);
   root.append(header);
 
   const strip = node("section", "melody-strip");
@@ -101,10 +116,14 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
   for (const m of run.melodies || []) {
     const row = node("div", "melody");
     const copy = node("div");
-    const state = ["active", "completed", "locked"].includes(m.state) ? m.state : "unknown";
-    const required = Number.isInteger(m.notes) && m.notes > 0 ? m.notes : null;
-    const earned = Number.isInteger(m.notes_earned) && m.notes_earned >= 0
-      && required !== null && m.notes_earned <= required
+    const state = m.state === "active" || m.state === "completed" || m.state === "locked"
+      ? m.state
+      : "unknown";
+    const required = typeof m.notes === "number" && Number.isInteger(m.notes) && m.notes > 0
+      ? m.notes
+      : null;
+    const earned = typeof m.notes_earned === "number" && Number.isInteger(m.notes_earned)
+      && m.notes_earned >= 0 && required !== null && m.notes_earned <= required
       ? m.notes_earned
       : null;
     const label = state === "completed"
@@ -136,8 +155,8 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
     const row = node("div", "talent item");
     const image = node("div", "talent-art");
     const copy = node("div", "item-copy");
-    row.style.setProperty("--rarity", RARITY[t.rarity] || "#96998c");
-    image.append(art(tables.TALENT_ICONS?.[code]?.[t.key]));
+    row.style.setProperty("--rarity", lookup(RARITY, t.rarity) || "#96998c");
+    image.append(art(lookup(lookup(tables.TALENT_ICONS, code), t.key)));
     copy.append(
       node("strong", "", t.name || "Unknown talent"),
       node("span", "rarity", t.rarity || "Rarity unavailable"),
@@ -153,19 +172,20 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
     ? run.object_counts
     : null;
   (run.objects || []).forEach((guid, i) => {
-    const key = tables.OBJECT_KEYS?.[guid];
-    const rarity = tables.OBJECT_RARITIES?.[guid];
+    const key = lookup(tables.OBJECT_KEYS, guid);
+    const rarity = lookup(tables.OBJECT_RARITIES, guid);
     const row = node("div", "object item");
     const image = node("div", "object-art");
     const copy = node("div", "item-copy");
-    row.style.setProperty("--rarity", RARITY[rarity] || "#96998c");
-    image.append(art(tables.SHOP_ICONS?.[key]));
+    row.style.setProperty("--rarity", lookup(RARITY, rarity) || "#96998c");
+    image.append(art(lookup(tables.SHOP_ICONS, key)));
     copy.append(
-      node("strong", "", tables.ITEM_NAMES?.[key] || "Unknown object"),
+      node("strong", "", lookup(tables.ITEM_NAMES, key) || "Unknown object"),
       node("span", "rarity", rarity || "Rarity unavailable"),
     );
-    const count = counts && Number.isInteger(counts[i]) && counts[i] >= 0 && counts[i] <= 65535
-      ? counts[i]
+    const raw = counts?.[i];
+    const count = typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 65535
+      ? raw
       : null;
     row.append(image, copy, node("b", "quantity", count === null ? "×—" : `×${count}`));
     objects.append(row);
@@ -217,10 +237,10 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
   root.append(footer);
 
   await document.fonts.ready;
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
     Promise.all([...document.images].map((image) => image.decode().catch(() => {}))),
-    new Promise((resolve) => {
+    new Promise<void>((resolve) => {
       timer = setTimeout(resolve, 3000);
     }),
   ]);
@@ -228,10 +248,12 @@ async function renderShare({ run, tables = {}, stylizedFonts = true }) {
   for (const image of document.images) {
     if (!image.complete || !image.naturalWidth) {
       image.hidden = true;
-      image.parentElement.classList.add("missing");
+      image.parentElement?.classList.add("missing");
     }
   }
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   return { width: 1600, height: Math.ceil(root.getBoundingClientRect().height) };
 }
 
+globalThis.renderShare = renderShare;
+})();

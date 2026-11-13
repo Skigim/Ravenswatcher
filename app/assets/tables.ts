@@ -57,8 +57,10 @@ const ICON_CHOICE: Record<string, string> = {
   Curse_Stack_Shard_Quest: 'Icon_Devil_Pocket_Full.png',
 };
 
-import { itemKey } from '../web/run-presentation';
-export { itemKey } from '../web/run-presentation';
+import type { RunPresentationCore } from '../web/run-presentation-api';
+// web/run-presentation.js is a classic browser script that also exports under Node.
+const presentation: RunPresentationCore = require('../web/run-presentation');
+export const itemKey = presentation.itemKey;
 const TEXT_KEY = /(?<![A-Za-z0-9_])[A-Za-z0-9_ ]+?_(Name|Description)(?![A-Za-z0-9_])/g;
 const ICON = /(?:Icon|UI)_[A-Za-z0-9_]+\.png/g;
 const ENTITY_REF = /([A-Za-z0-9_]+)\.entity\.ot/g;

@@ -22,6 +22,7 @@ export interface AssetTables {
   ITEM_TEXT?: unknown;
   SHOP_ICONS?: unknown;
   ITEM_NAMES?: unknown;
+  OBJECT_RARITIES?: unknown;
   OBJECT_KEYS?: unknown;
   HERO_ICONS?: unknown;
   DIFFICULTY_ICONS?: unknown;
