@@ -29,6 +29,11 @@ import type { SidecarFrame, StateFrame, ErrorFrame } from '../sidecar-frame';
 // KEEP IN SYNC WITH app/sidecar.js's EXIT_NO_GAME.
 export const EXIT_NO_GAME = 3;
 
+// Exit status for "the OS refused to let us read the game" (Linux ptrace_scope).
+// Distinct so the supervisor does not retry it at the waiting-for-game cadence.
+// KEEP IN SYNC WITH app/sidecar.ts's EXIT_NO_PERMISSION.
+export const EXIT_NO_PERMISSION = 4;
+
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
@@ -101,7 +106,8 @@ export function main(argv: string[]): void {
     process.stderr.write(errorMessage(e) + '\n');
     // findPid tags the nothing-is-running case; everything else that can
     // fail in the constructor needs a human, not a retry loop.
-    process.exit(errorCode(e) === 'ENOGAME' ? EXIT_NO_GAME : 1);
+    const code = errorCode(e);
+    process.exit(code === 'ENOGAME' ? EXIT_NO_GAME : code === 'EPERMISSION' ? EXIT_NO_PERMISSION : 1);
   }
   process.stderr.write(`${PROCESS_NAME} pid ${reader.pid}, module base 0x`
     + reader.base.toString(16).toUpperCase().padStart(16, '0')

@@ -40,6 +40,9 @@ const SUITES = [
   ['test-history', () => require('./test-history').main()],
   ['test-history-record', () => require('./test-history-record').main()],
   ['test-process-backend', () => require('./test-process-backend').main()],
+  ['test-procfs', () => require('./test-procfs').main()],
+  ['test-linux-backend', () => require('./test-linux-backend').main()],
+  ['test-case-path', () => require('./test-case-path').main()],
   ['test-history-deletion', () => require('./test-history-deletion').main()],
 ];
 
@@ -56,6 +59,10 @@ const WINDOWS_ONLY = new Set([
   // Windows-only koffi package that installs on other platforms omit.
   'test-no-shipped-content',
 ]);
+
+// Suites that attach to real processes through procfs (linux.ts). The pure
+// parsing in procfs.ts is covered portably by test-procfs.
+const LINUX_ONLY = new Set(['test-linux-backend']);
 
 // Suites that cannot run in this process. test-seams drives the real page in
 // a real window, so it needs an Electron runtime rather than plain node, and
@@ -162,6 +169,11 @@ function runSpawned(name, entry, electron) {
       skipped.push(name);
       continue;
     }
+    if (LINUX_ONLY.has(name) && process.platform !== 'linux') {
+      console.log(`\n${name}: SKIPPED -- needs a Linux process (platform is ${process.platform})`);
+      skipped.push(name);
+      continue;
+    }
     let f;
     try { f = await run(); }
     catch (e) { console.log(`\n${name}: THREW ${e.stack}`); f = 1; }
@@ -173,7 +185,7 @@ function runSpawned(name, entry, electron) {
   for (const [name, entry] of SPAWNED) total += runSpawned(name, entry, electron);
 
 
-  if (skipped.length) console.log(`\nSKIPPED (Windows-only): ${skipped.join(', ')}`);
+  if (skipped.length) console.log(`\nSKIPPED (needs another platform): ${skipped.join(', ')}`);
   console.log(`\n${total === 0 ? 'ALL SUITES PASSED' : total + ' FAILURE(S)'}`);
   process.exit(total ? 1 : 0);
 })();

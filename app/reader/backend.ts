@@ -11,6 +11,10 @@ export function getProcessBackend(platform: NodeJS.Platform = process.platform):
     const win32: typeof import('./win32') = require('./win32');
     return win32.win32Backend;
   }
+  if (platform === 'linux') {
+    const linux: typeof import('./linux') = require('./linux');
+    return linux.linuxBackend;
+  }
   throw Object.assign(
     new Error(`process backend: platform '${platform}' is unsupported`),
     { code: 'EUNSUPPORTED' satisfies ProcessErrorCode },

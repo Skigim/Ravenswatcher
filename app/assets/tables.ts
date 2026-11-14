@@ -32,8 +32,8 @@
 // neither.
 
 import * as fs from 'fs';
-import * as path from 'path';
 import { decodeName, encodeName } from './cipher';
+import { caseResolver } from './case-path';
 import type { HistoryArtTables } from './history-art';
 
 export interface Tables extends HistoryArtTables {
@@ -68,7 +68,7 @@ const LISTED = /Objects\\Magical_Objects\\[A-Za-z0-9_\\]+?\\([A-Za-z0-9_]+)\.ent
 
 /** The cooked path of a decoded path relative to the _Cooking directory. */
 export function cookedPath(cookingDir: string, decodedRel: string): string {
-  return path.join(cookingDir, ...decodedRel.split('/').map(encodeName));
+  return caseResolver.resolve(cookingDir, decodedRel.split('/').map(encodeName));
 }
 
 export function readCooked(cookingDir: string, decodedRel: string): Buffer {

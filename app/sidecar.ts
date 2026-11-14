@@ -33,6 +33,12 @@ export const SHUTDOWN_GRACE_MS = 30000;
 // KEEP IN SYNC WITH app/reader/stdio.js's EXIT_NO_GAME.
 export const EXIT_NO_GAME = 3;
 
+// The reader exits with this when the OS denies read access to the game (Linux
+// ptrace_scope). Retrying fast cannot help, so it goes straight to the slowest
+// backoff step; the reader's stderr line is surfaced as the "down" message.
+// KEEP IN SYNC WITH app/reader/stdio.ts's EXIT_NO_PERMISSION.
+export const EXIT_NO_PERMISSION = 4;
+
 // Cap on how much stderr text we hold onto for the "down" message -- the
 // sidecar only ever writes a couple of short lines (the attach banner, or a
 // one-line fatal message), but this keeps a runaway stack trace from an
@@ -271,7 +277,9 @@ export function createSidecar({ packaged, resourcesPath, repoRoot, onFrame, onDo
     retryAttempt = waitingForGame ? 0 : retryAttempt + 1;
     const delay = waitingForGame
       ? BASE_RETRY_MS
-      : Math.min(BASE_RETRY_MS * 2 ** (retryAttempt - 1), MAX_RETRY_MS);
+      : code === EXIT_NO_PERMISSION
+        ? MAX_RETRY_MS
+        : Math.min(BASE_RETRY_MS * 2 ** (retryAttempt - 1), MAX_RETRY_MS);
     const message = stderrTail.trim() || `sidecar exited unexpectedly (code=${code}, signal=${signal})`;
     console.log(`[sidecar] down: ${message} (retrying in ${delay}ms${waitingForGame ? '' : `, attempt ${retryAttempt}`})`);
 

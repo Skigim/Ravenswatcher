@@ -1,6 +1,6 @@
 // Platform-neutral process backend: the contract a per-OS implementation
-// (win32.js today, a Linux backend later) must satisfy. Types only; nothing
-// requires this module yet. It is modelled on what win32.js and its callers
+// (win32.ts, linux.ts) must satisfy. Types only. It is modelled on what
+// win32.ts and its callers
 // (reader.js, scan.js, sweeper.js, placement.js, rtti.js, pefile.js and the
 // *-worker files) do now, so a Windows backend can implement it unchanged.
 //
@@ -69,9 +69,10 @@ export interface ProcessHandle {
 
   /**
    * Read `size` bytes as a freshly copied Buffer (placement.js, rtti.js,
-   * values). null when nothing could be read. A partial read yields a Buffer
-   * shorter than `size`; callers that need all of it check the length. The
-   * result never aliases backend scratch memory.
+   * values). All or nothing: null unless every byte was read, because the
+   * struct readers index into the result without checking its length. The
+   * result never aliases backend scratch memory. (readInto is the one that
+   * may report a partial count.)
    */
   read(addr: number, size: number): Buffer | null;
 
@@ -94,8 +95,11 @@ export interface ProcessHandle {
  * supervisor retries at a steady cadence. The several-candidates failure is
  * deliberately untagged, as in win32.js: it needs a human. 'EUNSUPPORTED'
  * is thrown by getProcessBackend (backend.ts) for a platform with no backend.
+ * 'EPERMISSION' means the OS denied permission to read the process (Linux:
+ * ptrace_scope forbids reading a non-descendant); retrying at speed cannot
+ * fix it, so stdio.ts exits with its own status for it.
  */
-export type ProcessErrorCode = 'ENOGAME' | 'EUNSUPPORTED';
+export type ProcessErrorCode = 'ENOGAME' | 'EUNSUPPORTED' | 'EPERMISSION';
 
 /** The backend: one implementation per platform. */
 export interface ProcessBackend {
