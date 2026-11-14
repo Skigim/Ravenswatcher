@@ -8,7 +8,8 @@
 
 import * as fs from 'fs';
 import {
-  DEFAULT_PROC_ROOT, findPids, moduleFromMaps, parseMaps, procStartTime, procState,
+  DEFAULT_PROC_ROOT, findPids, imageCandidates, parseMaps, procStartTime, procState, readMaps,
+  resolveModule,
 } from './procfs';
 import type {
   MemoryRegion, ModuleInfo, ProcessBackend, ProcessCandidate, ProcessErrorCode, ProcessHandle,
@@ -102,7 +103,7 @@ export class LinuxProcess implements ProcessHandle {
   *regions(writableOnly = false): Generator<MemoryRegion, void, undefined> {
     let text: string;
     try {
-      text = fs.readFileSync(`${DEFAULT_PROC_ROOT}/${this.pid}/maps`, 'latin1');
+      text = readMaps(this.pid);
     } catch {
       return;
     }
@@ -132,36 +133,34 @@ export function openProcess(pid: number): LinuxProcess {
   return new LinuxProcess(fd, pid, start);
 }
 
-/** Image names this process might be known by: argv[0], comm, the exe link. */
+/** Image names this process might be known by (see imageCandidates). */
 function candidateNames(pid: number): string[] {
-  const names: string[] = [];
-  const base = (p: string): string => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
-  const add = (n: string): void => { if (n && !names.includes(n)) names.push(n); };
-  try { add(base(fs.readFileSync(`${DEFAULT_PROC_ROOT}/${pid}/cmdline`, 'latin1').split('\0')[0] ?? '')); } catch { /* gone */ }
-  try { add(fs.readFileSync(`${DEFAULT_PROC_ROOT}/${pid}/comm`, 'latin1').trim()); } catch { /* gone */ }
-  try { add(base(fs.readlinkSync(`${DEFAULT_PROC_ROOT}/${pid}/exe`))); } catch { /* gone or denied */ }
-  return names;
+  const read = (f: () => string): string => { try { return f(); } catch { return ''; } };
+  return imageCandidates(
+    read(() => fs.readFileSync(`${DEFAULT_PROC_ROOT}/${pid}/cmdline`, 'utf8')),
+    read(() => fs.readFileSync(`${DEFAULT_PROC_ROOT}/${pid}/comm`, 'utf8')),
+    read(() => fs.readlinkSync(`${DEFAULT_PROC_ROOT}/${pid}/exe`)), // gone or denied: ''
+  );
 }
 
 /**
  * Main image of `pid`. The contract passes no name, so it is derived from the
- * process itself: under Wine argv[0] is the game's own (Windows) path.
+ * process itself: under Wine argv[0] is the game's own (Windows) path, and a
+ * game image missing from the maps throws rather than falling back to Wine's
+ * loader.
  */
 export function moduleInfo(pid: number): ModuleInfo {
   let text: string;
   try {
-    text = fs.readFileSync(`${DEFAULT_PROC_ROOT}/${pid}/maps`, 'latin1');
+    text = readMaps(pid);
   } catch (e) {
     if (isDenied(e)) throw permissionError('reading the memory map', pid, e);
     throw new Error(`could not read the memory map for PID ${pid} -- `
       + 'check the PID, or omit it to find the game automatically', { cause: e });
   }
-  const maps = parseMaps(text);
-  let last: unknown = new Error(`could not determine the image name for PID ${pid}`);
-  for (const name of candidateNames(pid)) {
-    try { return moduleFromMaps(maps, name); } catch (e) { last = e; }
-  }
-  throw last;
+  const names = candidateNames(pid);
+  if (!names.length) throw new Error(`could not determine the image name for PID ${pid}`);
+  return resolveModule(parseMaps(text), names);
 }
 
 export const linuxBackend: ProcessBackend = {

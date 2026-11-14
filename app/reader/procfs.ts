@@ -72,8 +72,16 @@ export function matchesExe(comm: string, cmdline: string, exeName: string): bool
   return !!argv0 && baseName(argv0).toLowerCase() === target;
 }
 
+// Pathnames in procfs are the filesystem's raw bytes, which on Linux are
+// UTF-8: latin1 would turn /home/André into /home/AndrÃ© and send asset
+// loading to a directory that does not exist.
 function readText(file: string): string | null {
-  try { return fs.readFileSync(file, 'latin1'); } catch { return null; }
+  try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+}
+
+/** The text of /proc/<pid>/maps, decoded as UTF-8. Throws the fs error. */
+export function readMaps(pid: number, root: string = DEFAULT_PROC_ROOT): string {
+  return fs.readFileSync(path.join(root, String(pid), 'maps'), 'utf8');
 }
 
 /** Every numeric pid under `root` whose comm/cmdline matches `exeName`. */
@@ -103,6 +111,33 @@ export function moduleFromMaps(maps: MapEntry[], exeName: string): ModuleInfo {
   const same = mine.filter(m => m.path === zero.path);
   const end = Math.max(...same.map(m => m.end));
   return { base: zero.start, size: end - zero.start, exePath: zero.path };
+}
+
+/**
+ * Image names to look up in the maps, in order: argv[0]'s basename, comm,
+ * then the exe link's basename. Under Wine the first two name the Windows
+ * game while the exe link names Wine's own loader, so once a Windows image
+ * (.exe) is named only those names are returned: a game image missing from
+ * the maps must fail, not resolve to the loader's ELF base and directory.
+ */
+export function imageCandidates(cmdline: string, comm: string, exeLink: string): string[] {
+  const names: string[] = [];
+  const add = (n: string): void => { if (n && !names.includes(n)) names.push(n); };
+  add(baseName(cmdline.split('\0')[0] ?? ''));
+  add(comm.trim());
+  const windows = names.filter(n => /\.exe$/i.test(n));
+  if (windows.length) return windows;
+  add(baseName(exeLink));
+  return names;
+}
+
+/** The first of `names` that moduleFromMaps resolves; throws the last failure. */
+export function resolveModule(maps: MapEntry[], names: string[]): ModuleInfo {
+  let last: unknown = new Error('could not determine the image name');
+  for (const name of names) {
+    try { return moduleFromMaps(maps, name); } catch (e) { last = e; }
+  }
+  throw last;
 }
 
 /** Field 22 (starttime, clock ticks since boot) of /proc/<pid>/stat. */

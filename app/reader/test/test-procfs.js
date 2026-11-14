@@ -7,7 +7,10 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseMaps, moduleFromMaps, matchesExe, findPids, procStartTime, procState } = require('../procfs');
+const {
+  parseMaps, moduleFromMaps, matchesExe, findPids, procStartTime, procState, readMaps,
+  imageCandidates, resolveModule,
+} = require('../procfs');
 
 const EXE = '/home/u/.steam/steam apps/common/Ravenswatch/Ravenswatch.exe';
 const MAPS = [
@@ -71,9 +74,38 @@ function main() {
     fs.writeFileSync(path.join(root, 'uptime'), '1 1');
     assert.deepStrictEqual(findPids('Ravenswatch.exe', root), [200, 300, 500]);
     assert.deepStrictEqual(findPids('Ravenswatch.exe', path.join(root, 'missing')), []);
+
+    // readMaps decodes UTF-8: a non-ASCII parent directory survives intact,
+    // where latin1 would hand back /home/AndrÃ©/... and a dead install dir.
+    const utf8Exe = '/home/André/Steam/Ravenswatch/Ravenswatch.exe';
+    fs.mkdirSync(path.join(root, '600'));
+    fs.writeFileSync(path.join(root, '600', 'maps'),
+      Buffer.from(`140000000-140001000 r--p 00000000 08:02 1234 ${utf8Exe}\n`, 'utf8'));
+    assert.strictEqual(moduleFromMaps(parseMaps(readMaps(600, root)), 'Ravenswatch.exe').exePath, utf8Exe);
+    assert.throws(() => readMaps(601, root), { code: 'ENOENT' });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+
+  // imageCandidates / resolveModule: once argv[0] or comm names a Windows
+  // image, Wine's loader (the exe link) is never a fallback.
+  const wineNames = imageCandidates('Z:\\games\\Ravenswatch.exe\0', 'Ravenswatch.exe\n', '/usr/bin/wine64-preloader');
+  assert.deepStrictEqual(wineNames, ['Ravenswatch.exe']);
+  assert.deepStrictEqual(
+    imageCandidates('C:\\g\\Ravenswatch.exe\0', 'wine64-preloader\n', '/usr/bin/wine64-preloader'),
+    ['Ravenswatch.exe'], 'a loader comm is dropped too');
+  const loaderOnly = parseMaps([
+    '7f1000000000-7f1000001000 r--p 00000000 08:02 77 /usr/bin/wine64-preloader',
+    '7f1000001000-7f1000010000 r-xp 00001000 08:02 77 /usr/bin/wine64-preloader',
+  ].join('\n'));
+  assert.throws(() => resolveModule(loaderOnly, wineNames), /Ravenswatch\.exe/,
+    'a missing game image fails instead of resolving to the loader');
+  assert.strictEqual(resolveModule(maps, wineNames).base, 0x140000000);
+  // A native process keeps every name, exe link last.
+  assert.deepStrictEqual(imageCandidates('/usr/bin/sleep\0' + '30\0', 'sleep\n', '/usr/bin/sleep'), ['sleep']);
+  assert.deepStrictEqual(imageCandidates('', '', '/usr/bin/coreutils'), ['coreutils']);
+  assert.deepStrictEqual(imageCandidates('', '', ''), []);
+  assert.throws(() => resolveModule(maps, []), /could not determine/);
 
   // procStartTime / procState: comm may hold spaces and parens.
   const rest = ['S', ...Array.from({ length: 18 }, (_, i) => String(i + 4)), '987654'];
