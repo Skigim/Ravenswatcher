@@ -9,7 +9,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createSidecar, BASE_RETRY_MS } = require('../../sidecar');
+const { createSidecar, BASE_RETRY_MS, MAX_RETRY_MS } = require('../../sidecar');
 const { createLifecycle } = require('../../lifecycle');
 const assert = require('assert');
 
@@ -199,11 +199,39 @@ async function testManualStartCancelsPendingRetryTimer() {
   cleanupStateFile();
 }
 
+/**
+ * A refused attach (reader exit 4, e.g. Ubuntu's ptrace_scope) cannot be fixed
+ * by retrying quickly: the supervisor waits the maximum delay at once and
+ * hands the reader's own explanation to the renderer.
+ */
+async function testNoPermissionRetriesSlowly() {
+  process.env.SIDECAR_TEST_MODE = 'no-permission';
+  delete process.env.SIDECAR_STATE_FILE;
+  const downEvents = [];
+  const sidecar = createSidecar({
+    packaged: false,
+    repoRoot: path.join(__dirname, '..', '..', '..'),
+    readerEntry: STUB_PATH,
+    onDown: (info) => downEvents.push(info),
+  });
+  sidecar.start();
+  await waitFor(() => downEvents.length >= 1);
+  await sidecar.stop();
+  const first = downEvents[0];
+  check('a permission refusal retries at the maximum delay on the first failure',
+    first !== undefined && first.retryDelayMs === MAX_RETRY_MS && first.attempt === 1,
+    `retryDelayMs=${first && first.retryDelayMs}`);
+  check('and reports the reader\'s permission message',
+    first !== undefined && /permission denied/.test(first.message),
+    `message=${first && first.message}`);
+}
+
 async function main() {
   console.log('\ntest-sidecar: supervisor start/stop and restart regression');
   await testControlSingleStart();
   await testRestartAfterStopSupervises();
   await testManualStartCancelsPendingRetryTimer();
+  await testNoPermissionRetriesSlowly();
   for (const mode of ['stay', 'ignore-stop']) {
     process.env.SIDECAR_TEST_MODE = mode;
     let pid;

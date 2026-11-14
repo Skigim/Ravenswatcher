@@ -23,6 +23,10 @@ function frame(extra) {
 if (mode === 'fail') {
   process.stderr.write('stub child failure\n');
   process.exit(1);
+} else if (mode === 'no-permission') {
+  // What the reader does when ptrace_scope refuses the attach.
+  process.stderr.write('permission denied opening memory for PID 1 -- stub\n');
+  process.exit(4);
 } else if (mode === 'fail-once-file') {
   const stateFile = process.env.SIDECAR_STATE_FILE;
   let count = 0;
