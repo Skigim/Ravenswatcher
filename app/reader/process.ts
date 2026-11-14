@@ -69,9 +69,10 @@ export interface ProcessHandle {
 
   /**
    * Read `size` bytes as a freshly copied Buffer (placement.js, rtti.js,
-   * values). null when nothing could be read. A partial read yields a Buffer
-   * shorter than `size`; callers that need all of it check the length. The
-   * result never aliases backend scratch memory.
+   * values). All or nothing: null unless every byte was read, because the
+   * struct readers index into the result without checking its length. The
+   * result never aliases backend scratch memory. (readInto is the one that
+   * may report a partial count.)
    */
   read(addr: number, size: number): Buffer | null;
 

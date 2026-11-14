@@ -76,12 +76,15 @@ export class LinuxProcess implements ProcessHandle {
     }
   }
 
+  /**
+   * All or nothing, like ReadProcessMemory: a read that pread cuts short at
+   * an unmapped page is null. The struct readers index into the result
+   * without checking its length, because on Windows it never comes back short.
+   */
   read(addr: number, size: number): Buffer | null {
     const buf = Buffer.allocUnsafe(size);
     const n = this.readInto(addr, buf, size);
-    if (!n) return null;
-    // Copy so a short read does not pin the oversized allocation.
-    return n === size ? buf : Buffer.from(buf.subarray(0, n));
+    return n === size && n > 0 ? buf : null;
   }
 
   readPtr(addr: number): number | null {
