@@ -111,8 +111,13 @@ export function* iterChunks(
     while (off < size) {
       const n = Math.min(size - off, CHUNK_SIZE);
       const got = proc.readInto(base + off, b.ptr, n);
-      if (got >= 8) yield [base + off, Math.floor(got / 8)];
-      else if (n > RETRY_SIZE) yield* retryInPieces(proc, b, base + off, n);
+      if (got >= 8) {
+        yield [base + off, Math.floor(got / 8)];
+        // A partial read (Linux pread stops at the first unreadable page;
+        // Win32 never returns one) leaves the rest of the chunk to retry.
+        const done = Math.floor(got / 8) * 8;
+        if (done < n) yield* retryInPieces(proc, b, base + off + done, n - done);
+      } else if (n > RETRY_SIZE) yield* retryInPieces(proc, b, base + off, n);
       off += n;
     }
   }

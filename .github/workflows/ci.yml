@@ -20,3 +20,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+  test-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      # Ubuntu 24.04 blocks the unprivileged user namespaces Electron's
+      # sandbox needs; the Electron-driven suites crash at launch without this.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: xvfb-run -a npm test

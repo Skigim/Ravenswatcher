@@ -80,6 +80,12 @@
 /app/reader/backend.js
 /app/reader/backend.js.map
 /app/reader/backend.d.ts
+/app/reader/linux.js
+/app/reader/linux.js.map
+/app/reader/linux.d.ts
+/app/reader/procfs.js
+/app/reader/procfs.js.map
+/app/reader/procfs.d.ts
 /app/history.js
 /app/history.js.map
 /app/history.d.ts

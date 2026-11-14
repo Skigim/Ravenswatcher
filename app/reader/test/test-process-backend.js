@@ -67,7 +67,8 @@ async function main() {
   assert.strictEqual(resolvePid(fakeBackend({ candidates: [{ pid: 77 }] }).backend, GAME), 77);
 
   // An unsupported platform has no backend, tagged so callers can tell.
-  assert.throws(() => getProcessBackend('plan9'), (e) => e.code === 'EUNSUPPORTED');
+  assert.throws(() => getProcessBackend('darwin'), (e) => e.code === 'EUNSUPPORTED');
+  assert.strictEqual(getProcessBackend('linux').platform, 'linux');
 
   // Attach: identity comes from moduleInfo, the handle from open().
   const f = fakeBackend({ candidates: [{ pid: 4242 }] });

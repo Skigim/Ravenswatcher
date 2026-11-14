@@ -109,6 +109,25 @@ function main() {
     bigGot.some(([b, n]) => b === BASE + CHUNK_SIZE && n === RETRY_SIZE),
     `yielded ${bigGot.length} range(s), ${totalBytes(bigGot)} bytes`);
 
+  // Linux pread on /proc/<pid>/mem does not fail the whole request: it returns
+  // the bytes before the first unreadable page. The rest of the chunk after
+  // that page must still be retried, not dropped with the short count.
+  const partialReads = [];
+  const partial = {
+    *regions() { yield [BASE, SIZE]; },
+    readInto(addr, _ptr, n) {
+      partialReads.push([addr, n]);
+      if (deadAt >= addr && deadAt < addr + n) return Math.floor((deadAt - addr) / 0x1000) * 0x1000;
+      return n;
+    },
+  };
+  const partialGot = covered(partial);
+  check('a partial read keeps its bytes and retries the remainder',
+    totalBytes(partialGot) === SIZE - RETRY_SIZE
+    && partialGot[0][0] === BASE && partialGot[0][1] === 2 * RETRY_SIZE
+    && partialGot.some(([b, n]) => b === BASE + 3 * RETRY_SIZE && n === RETRY_SIZE),
+    `${totalBytes(partialGot)} of ${SIZE} bytes in ${partialGot.length} range(s)`);
+
   return failures;
 }
 

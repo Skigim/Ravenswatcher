@@ -20,6 +20,7 @@ import { parseTexture } from './texture';
 import { encodePng } from './png';
 import { buildTables, readCooked, Tables } from './tables';
 import { buildHistoryArt } from './history-art';
+import { caseResolver } from './case-path';
 
 export const CACHE_DIR_NAME = 'game-assets';
 const COOKING = ['DarkTalesResources', '_Cooking'];
@@ -56,7 +57,7 @@ export function texturePath(uiPath: string): string {
 }
 
 export function buildAssets(opts: BuildOptions): Tables {
-  const cookingDir = path.join(opts.installDir, ...COOKING);
+  const cookingDir = caseResolver.resolve(opts.installDir, COOKING);
   const art = buildHistoryArt(cookingDir);
   const rows = [...readManifest(opts.manifestPath), ...art.rows];
   const iconAssets = new Map(rows.map((r) => [r.uiPath, r.asset]));
