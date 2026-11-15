@@ -23,7 +23,11 @@ const WEB_SKIP = new Set(['test']);
 // tsconfig.json and *.tsbuildinfo drive the renderer build only; the page never reads them.
 const WEB_SKIP_FILE = (rel) => /^assets\/[^/]+\.png$/.test(rel) || rel === 'item-text.js' || rel === 'item-icons.js'
   || rel === 'tsconfig.json' || rel.endsWith('.tsbuildinfo');
-const NATIVE = ['node_modules/koffi', 'node_modules/@koromix/koffi-win32-x64'];
+// koffi serves only the Windows backend (win32.ts, required lazily). The
+// Linux backend reads procfs with plain fs, so a Linux package ships no
+// native module at all.
+const WINDOWS = process.platform === 'win32';
+const NATIVE = WINDOWS ? ['node_modules/koffi', 'node_modules/@koromix/koffi-win32-x64'] : [];
 const NATIVE_SKIP = new Set(['doc', 'vendor']);
 
 function rm(p) { fs.rmSync(p, { recursive: true, force: true }); }
@@ -59,7 +63,7 @@ function stagePackageJson() {
     license: pkg.license,
     repository: pkg.repository,
     main: pkg.main,
-    dependencies: pkg.dependencies,
+    dependencies: WINDOWS ? pkg.dependencies : {},
     build: {
       ...pkg.build,
       electronVersion,
@@ -67,7 +71,8 @@ function stagePackageJson() {
       directories: { output: '../release' },
       // Everything staged is meant to ship; the selection happened above.
       files: ['**/*'],
-      // koffi is prebuilt and already in place; nothing to rebuild or fetch.
+      // koffi (Windows only) is prebuilt and already in place; nothing to
+      // rebuild or fetch.
       npmRebuild: false,
       nodeGypRebuild: false,
       buildDependenciesFromSource: false,

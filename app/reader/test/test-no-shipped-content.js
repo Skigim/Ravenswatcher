@@ -49,6 +49,18 @@ function main() {
     }
     assert.strictEqual(fs.readFileSync(path.join(stage, 'web', 'share.js'), 'utf8'),
       fs.readFileSync(path.join(appDir, 'web', 'share.js'), 'utf8'), 'staging preserves readable runtime source');
+    // Per-target native code: koffi serves only the Windows backend, so the
+    // Windows stage carries it and every other stage carries no native module.
+    const stagedDeps = JSON.parse(fs.readFileSync(path.join(stage, 'package.json'), 'utf8')).dependencies;
+    const nodeFiles = walk(stage).filter((p) => p.endsWith('.node'));
+    if (process.platform === 'win32') {
+      assert.ok(fs.existsSync(path.join(stage, 'node_modules', 'koffi')), 'koffi missing from the Windows stage');
+      assert.ok('koffi' in stagedDeps, 'koffi missing from the Windows staged dependencies');
+    } else {
+      assert.ok(!fs.existsSync(path.join(stage, 'node_modules')), `node_modules in the ${process.platform} stage`);
+      assert.deepStrictEqual(stagedDeps, {}, `dependencies in the ${process.platform} stage`);
+      assert.deepStrictEqual(nodeFiles, [], `native module in the ${process.platform} stage`);
+    }
   } finally {
     fs.rmSync(stage, { recursive: true, force: true });
   }

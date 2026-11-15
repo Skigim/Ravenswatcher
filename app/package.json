@@ -32,7 +32,15 @@
     },
     "asarUnpack": [
       "**/*.node"
-    ]
+    ],
+    "linux": {
+      "target": [
+        "tar.gz"
+      ],
+      "executableName": "ravenswatcher",
+      "category": "Game",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "koffi": "^3.1.6"

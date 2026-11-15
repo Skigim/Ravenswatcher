@@ -41,3 +41,21 @@ jobs:
       # refused attach to a non-descendant (how the game relates to this app).
       - run: sudo sysctl -w kernel.yama.ptrace_scope=1
       - run: xvfb-run -a npm test
+      - run: npm run dist
+      # The packaged app must start and spawn its packaged reader. With no
+      # game running, the reader's exit status 3 (no game) is the proof.
+      - name: Smoke-test the packaged app
+        shell: bash
+        run: |
+          set -u
+          tarball=$(ls ../build/release/*-linux-x64.tar.gz)
+          mkdir -p ../build/smoke && tar -xzf "$tarball" -C ../build/smoke
+          exe=$(find ../build/smoke -maxdepth 2 -type f -name ravenswatcher | head -1)
+          timeout -k 5 20 xvfb-run -a "$exe" > ../build/smoke.log 2>&1 || true
+          cat ../build/smoke.log
+          grep -q '\[sidecar\] exited (code=3' ../build/smoke.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ravenswatcher-linux-${{ github.sha }}
+          path: build/release/*-linux-x64.tar.gz
+          if-no-files-found: error

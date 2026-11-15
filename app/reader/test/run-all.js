@@ -55,9 +55,6 @@ const SUITES = [
 const WINDOWS_ONLY = new Set([
   'test-readonly', 'test-chain', 'test-placement', 'test-cadence', 'test-reattach',
   'test-stdio', 'test-worker-lifecycle',
-  // Not a process fixture: it runs stage-dist.js, which stages the
-  // Windows-only koffi package that installs on other platforms omit.
-  'test-no-shipped-content',
 ]);
 
 // Suites that attach to real processes through procfs (linux.ts). The pure
