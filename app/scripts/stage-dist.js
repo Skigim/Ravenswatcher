@@ -13,7 +13,7 @@ const STAGE = process.env.STAGE_DIR || path.join(ROOT, 'build', 'stage');
 // What ships, as an explicit copy rather than a package.json "files" glob,
 // so an omission is a missing file at startup rather than a silently
 // included one.
-const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'preload.js', 'external-links.js', 'update.js', 'history.js', 'share.js', 'lifecycle.js'];
+const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'sidecar-frame.js', 'preload.js', 'external-links.js', 'update.js', 'history.js', 'share.js', 'lifecycle.js'];
 const READER_SKIP = new Set(['test', 'bench', 'README.md']);
 const WEB_SKIP = new Set(['test']);
 // Reference content the app never reads: the decoded PNGs and the generated
@@ -23,7 +23,11 @@ const WEB_SKIP = new Set(['test']);
 // tsconfig.json and *.tsbuildinfo drive the renderer build only; the page never reads them.
 const WEB_SKIP_FILE = (rel) => /^assets\/[^/]+\.png$/.test(rel) || rel === 'item-text.js' || rel === 'item-icons.js'
   || rel === 'tsconfig.json' || rel.endsWith('.tsbuildinfo');
-const NATIVE = ['node_modules/koffi', 'node_modules/@koromix/koffi-win32-x64'];
+// koffi serves only the Windows backend (win32.ts, required lazily). The
+// Linux backend reads procfs with plain fs, so a Linux package ships no
+// native module at all.
+const WINDOWS = process.platform === 'win32';
+const NATIVE = WINDOWS ? ['node_modules/koffi', 'node_modules/@koromix/koffi-win32-x64'] : [];
 const NATIVE_SKIP = new Set(['doc', 'vendor']);
 
 function rm(p) { fs.rmSync(p, { recursive: true, force: true }); }
@@ -59,7 +63,7 @@ function stagePackageJson() {
     license: pkg.license,
     repository: pkg.repository,
     main: pkg.main,
-    dependencies: pkg.dependencies,
+    dependencies: WINDOWS ? pkg.dependencies : {},
     build: {
       ...pkg.build,
       electronVersion,
@@ -67,7 +71,8 @@ function stagePackageJson() {
       directories: { output: '../release' },
       // Everything staged is meant to ship; the selection happened above.
       files: ['**/*'],
-      // koffi is prebuilt and already in place; nothing to rebuild or fetch.
+      // koffi (Windows only) is prebuilt and already in place; nothing to
+      // rebuild or fetch.
       npmRebuild: false,
       nodeGypRebuild: false,
       buildDependenciesFromSource: false,
@@ -112,6 +117,27 @@ async function main() {
     }
   })(STAGE);
   if (sources.length) throw new Error('development files in stage: ' + sources.join(', '));
+
+  // Every relative require in the staged code must resolve inside the stage.
+  // The explicit lists above make an omission a missing module, and this turns
+  // it into a failed build instead of a packaged app that dies at startup.
+  const unresolved = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(file); continue; }
+      if (!entry.name.endsWith('.js')) continue;
+      for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+        if (/^\s*(\/\/|\*)/.test(line)) continue; // comments mention modules too
+        for (const m of line.matchAll(/require\((['"])(\.{1,2}\/[^'"]+)\1\)/g)) {
+          const target = path.resolve(path.dirname(file), m[2]);
+          const found = ['', '.js', '.json', '/index.js'].some((ext) => fs.existsSync(target + ext));
+          if (!found) unresolved.push(`${path.relative(STAGE, file)} -> ${m[2]}`);
+        }
+      }
+    }
+  })(STAGE);
+  if (unresolved.length) throw new Error('unresolved requires in stage: ' + unresolved.join(', '));
 
   // No decoded game content. The manifest and the font are the whole of
   // web/assets in the zip; anything else there is a PNG somebody added.
