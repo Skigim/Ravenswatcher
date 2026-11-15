@@ -1,12 +1,15 @@
 'use strict';
-// The Linux backend against real procfs: our own process, and a child.
+// The Linux backend against real procfs: our own process, a child, and a
+// process that is not our descendant (the ptrace_scope case).
 // Linux-only -- run-all.js must not run it elsewhere.
 
 const assert = require('assert');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 const { linuxBackend } = require('../linux');
+const { EXIT_NO_PERMISSION } = require('../stdio');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -62,6 +65,38 @@ async function main() {
     h.close();
   } finally {
     child.kill('SIGKILL');
+  }
+
+  // A process that is NOT our descendant, which is how the game relates to
+  // this app. Yama's ptrace_scope decides whether we may read it: 0 allows it,
+  // 1 (Ubuntu's default) and above refuse. sh backgrounds sleep and exits, so
+  // sleep is reparented away from us.
+  let scope = 0;
+  try { scope = Number(fs.readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim()); } catch { /* no Yama */ }
+  console.log(`  ptrace_scope: ${scope}`);
+  const orphan = Number(execFileSync('sh', ['-c', 'sleep 30 >/dev/null 2>&1 & echo $!'], { encoding: 'utf8' }).trim());
+  try {
+    await sleep(200);
+    const ppid = Number(fs.readFileSync(`/proc/${orphan}/stat`, 'utf8').split(') ')[1].split(' ')[1]);
+    assert.notStrictEqual(ppid, process.pid, 'the orphan is not our child');
+    // Reading the memory map is not an attach, so Yama allows it at any scope.
+    const mod = linuxBackend.moduleInfo(orphan);
+    if (scope === 0) {
+      const h = linuxBackend.open(orphan);
+      assert.strictEqual(h.readI32(mod.base), 0x464c457f, 'reads the ELF header');
+      h.close();
+    } else {
+      assert.throws(() => linuxBackend.open(orphan), (e) => e.code === 'EPERMISSION' && /ptrace_scope/.test(e.message),
+        'a refused attach is EPERMISSION and names ptrace_scope');
+      // The reader turns that into its own exit status, which the sidecar
+      // retries slowly instead of hammering.
+      const res = spawnSync(process.execPath, [path.join(__dirname, '..', 'stdio.js'), String(orphan)],
+        { encoding: 'utf8', timeout: 15000 });
+      assert.strictEqual(res.status, EXIT_NO_PERMISSION, `reader exit status (stderr: ${res.stderr.trim()})`);
+      assert.match(res.stderr, /permission denied/);
+    }
+  } finally {
+    try { process.kill(orphan, 'SIGKILL'); } catch { /* already gone */ }
   }
 
   console.log('test-linux-backend: ok');

@@ -37,4 +37,7 @@ jobs:
       # Ubuntu 24.04 blocks the unprivileged user namespaces Electron's
       # sandbox needs; the Electron-driven suites crash at launch without this.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Ubuntu's default, pinned so test-linux-backend always exercises the
+      # refused attach to a non-descendant (how the game relates to this app).
+      - run: sudo sysctl -w kernel.yama.ptrace_scope=1
       - run: xvfb-run -a npm test
