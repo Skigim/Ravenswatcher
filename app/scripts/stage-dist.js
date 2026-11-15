@@ -13,7 +13,7 @@ const STAGE = process.env.STAGE_DIR || path.join(ROOT, 'build', 'stage');
 // What ships, as an explicit copy rather than a package.json "files" glob,
 // so an omission is a missing file at startup rather than a silently
 // included one.
-const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'preload.js', 'external-links.js', 'update.js', 'history.js', 'share.js', 'lifecycle.js'];
+const TOP_LEVEL_JS = ['main.js', 'sidecar.js', 'sidecar-frame.js', 'preload.js', 'external-links.js', 'update.js', 'history.js', 'share.js', 'lifecycle.js'];
 const READER_SKIP = new Set(['test', 'bench', 'README.md']);
 const WEB_SKIP = new Set(['test']);
 // Reference content the app never reads: the decoded PNGs and the generated
@@ -117,6 +117,27 @@ async function main() {
     }
   })(STAGE);
   if (sources.length) throw new Error('development files in stage: ' + sources.join(', '));
+
+  // Every relative require in the staged code must resolve inside the stage.
+  // The explicit lists above make an omission a missing module, and this turns
+  // it into a failed build instead of a packaged app that dies at startup.
+  const unresolved = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(file); continue; }
+      if (!entry.name.endsWith('.js')) continue;
+      for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+        if (/^\s*(\/\/|\*)/.test(line)) continue; // comments mention modules too
+        for (const m of line.matchAll(/require\((['"])(\.{1,2}\/[^'"]+)\1\)/g)) {
+          const target = path.resolve(path.dirname(file), m[2]);
+          const found = ['', '.js', '.json', '/index.js'].some((ext) => fs.existsSync(target + ext));
+          if (!found) unresolved.push(`${path.relative(STAGE, file)} -> ${m[2]}`);
+        }
+      }
+    }
+  })(STAGE);
+  if (unresolved.length) throw new Error('unresolved requires in stage: ' + unresolved.join(', '));
 
   // No decoded game content. The manifest and the font are the whole of
   // web/assets in the zip; anything else there is a PNG somebody added.
