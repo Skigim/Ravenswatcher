@@ -2,9 +2,11 @@
 
 A second-screen window for [Ravenswatch](https://store.steampowered.com/app/2071280/Ravenswatch/) that shows what the current run has put on the map, what the Sandman is selling, and which melodies are in play. It reads the running game and updates as you play. It changes nothing in the game.
 
-Built for Windows. It also runs on Linux under Proton; see [Linux](#linux).
+Runs on Windows and Linux. Linux users, see [Linux](#linux).
 
 ## Install
+
+These are the Windows instructions.
 
 1. Download the latest `Ravenswatcher-<version>-win-x64.zip` from the [Releases page](https://github.com/Skigim/Ravenswatcher/releases/latest).
 2. Extract the folder anywhere. There is no installer.
@@ -26,24 +28,33 @@ The gear opens settings: rules between the panels, a diagnostics footer, and how
 
 ## Linux
 
-The Windows build runs on Linux when it is launched inside the game's own Proton session. That is what lets it see the game. A Linux tester got it working this way; it is not something every setup has been tried on.
+1. Download the latest `Ravenswatcher-<version>-linux-x64.tar.gz` from the [Releases page](https://github.com/Skigim/Ravenswatcher/releases/latest).
+2. Extract it anywhere.
+3. Run the `ravenswatcher` executable inside the extracted folder.
 
-1. In Steam, open Ravenswatch → **Properties** → **Launch Options** and set:
+Settings and history are stored in your user config folder, `~/.config/Ravenswatcher`. To uninstall, delete the extracted folder. Delete the config folder too if you want your data gone.
 
-   ```
-   STEAM_COMPAT_LAUNCHER_SERVICE=proton %command%
-   ```
+It was tested on Debian 13 with Steam installed as a Flatpak, on X11. Attach, the live readout, and History all worked. Native (non-Flatpak) Steam, Wayland, and Steam Deck have not been tested.
 
-2. Download and extract the Windows zip as above.
-3. Start the game. Once it is running, in a terminal:
+As on Windows, the app reads the icons and item text from your installed copy of the game. The tarball does not include game art.
 
-   ```
-   <steamapps>/common/SteamLinuxRuntime_sniper/pressure-vessel/bin/steam-runtime-launch-client --bus-name=com.steampowered.App2071280 -- wine <path>/Ravenswatcher.exe
-   ```
+### The app can't attach to the game
 
-   `<steamapps>` is your Steam library's `steamapps` folder (often `~/.steam/steam/steamapps`), and `<path>` is where you extracted the zip.
+The app reads the game's memory, and Linux's Yama `ptrace_scope` setting controls that. Ubuntu's default (1) refuses the attach, because the game isn't a child of Ravenswatcher. Run:
 
-Adding Ravenswatcher to Steam as a non-Steam game does not work. Steam gives it a Proton session of its own, and it cannot see the game from there.
+```
+sudo sysctl kernel.yama.ptrace_scope=0
+```
+
+This lasts until you reboot, and it loosens a security restriction for the whole system. The alternative is to start Ravenswatcher as the game's parent process.
+
+### The app won't start on Ubuntu 24.04
+
+Ubuntu 24.04 restricts unprivileged user namespaces, which Electron's sandbox uses, so the app may fail to start. The known workaround is:
+
+```
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
 
 ## Co-op
 

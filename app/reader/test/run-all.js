@@ -39,6 +39,7 @@ const SUITES = [
   ['test-runs', () => require('./test-runs').main()],
   ['test-history', () => require('./test-history').main()],
   ['test-history-record', () => require('./test-history-record').main()],
+  ['test-history-016', () => require('./test-history-016').main()],
   ['test-process-backend', () => require('./test-process-backend').main()],
   ['test-procfs', () => require('./test-procfs').main()],
   ['test-linux-backend', () => require('./test-linux-backend').main()],

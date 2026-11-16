@@ -20,6 +20,28 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run dist
+      # The packaged app must start and spawn its packaged reader. With no
+      # game running, the reader's exit status 3 (no game) is the proof.
+      # APPDATA points at a temp folder so the app's userData stays isolated.
+      - name: Smoke-test the packaged app
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP 'smoke'
+          New-Item -ItemType Directory -Force $smoke | Out-Null
+          $env:APPDATA = $smoke
+          $env:LOCALAPPDATA = $smoke
+          $exe = (Resolve-Path ../build/release/win-unpacked/Ravenswatcher.exe).Path
+          $out = Join-Path $smoke 'out.log'
+          $err = Join-Path $smoke 'err.log'
+          $p = Start-Process $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          Start-Sleep -Seconds 20
+          taskkill /F /T /PID $p.Id | Out-Null
+          Start-Sleep -Seconds 1
+          Get-Content $out, $err -ErrorAction SilentlyContinue
+          $found = Select-String -Path $out, $err -SimpleMatch '[sidecar] exited (code=3' -Quiet
+          if (-not $found) { exit 1 }
+          exit 0
   test-linux:
     runs-on: ubuntu-latest
     defaults:
