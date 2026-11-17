@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7 — 2026-11-17
+
+* New: a native Linux build is available as Ravenswatcher-0.1.7-linux-x64.tar.gz, for Ravenswatch running under Steam Proton. It was tested on Debian 13 with Flatpak Steam on X11. The README covers Ubuntu's ptrace_scope and userns settings.
+* Linux process reading handles UTF-8 process maps and only considers .exe image names.
+* The app's code was rewritten in TypeScript. No change to how it works is intended.
+* Fixed a packaging bug where a missing file broke the packaged app. Builds now fail on any such missing file, and CI launches the packaged Windows and Linux apps on every change.
+* Run histories from 0.1.6 open unchanged. A test now covers this.
+
 ## 0.1.6 — 2026-10-17
 
 * Ravenswatcher is now fully open source under the MIT license. The complete app source has moved into the [Ravenswatcher repository](https://github.com/Skigim/Ravenswatcher) alongside its releases.
