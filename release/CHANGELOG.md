@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.7 — 2026-11-16
+## 0.1.7 — 2026-11-17
 
 * New: a native Linux build is available as Ravenswatcher-0.1.7-linux-x64.tar.gz, for Ravenswatch running under Steam Proton. It was tested on Debian 13 with Flatpak Steam on X11. The README covers Ubuntu's ptrace_scope and userns settings.
 * Linux process reading handles UTF-8 process maps and only considers .exe image names.
