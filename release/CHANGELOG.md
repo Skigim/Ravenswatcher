@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 — 2026-11-17
+
+* Restored the Live readout after the latest Ravenswatch patch. Updated the value-binding and game scene addresses used to detect the run and read map entries.
+* Documented the patch-recovery procedure and measured addresses for future compatibility fixes.
+
 ## 0.1.7 — 2026-11-17
 
 * New: a native Linux build is available as Ravenswatcher-0.1.7-linux-x64.tar.gz, for Ravenswatch running under Steam Proton. It was tested on Debian 13 with Flatpak Steam on X11. The README covers Ubuntu's ptrace_scope and userns settings.
