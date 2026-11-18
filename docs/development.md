@@ -62,6 +62,10 @@ Read each probe before running it; several attach or write diagnostic logs.
 
 ### Reader diagnostics
 
+For a game update that leaves Live stuck loading, start with the
+[patch-recovery procedure](patch-compatibility.md), including the previous
+measurements and the distinction between a missing target and stale anchors.
+
 Run the following from `app/reader/`, after building. These are reference
 commands, not part of the normal test suite. Only run live probes or collect
 new diagnostic data when explicitly requested for the current task.

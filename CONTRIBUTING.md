@@ -15,7 +15,7 @@ number to the measurement that produced it.
 ## Fork and branch
 
 Contribute through a fork of [Skigim/Ravenswatcher](https://github.com/Skigim/Ravenswatcher)
-and a pull request to the current release branch, **`release/0.1.7`**. Base your
+and a pull request to the current release branch, **`release/0.1.8`**. Base your
 work on that branch and select it explicitly as the PR target. When the next
 release starts, update the branch named here to the new active release branch.
 
@@ -28,7 +28,7 @@ release starts, update the branch named here to the new active release branch.
    cd Ravenswatcher
    git remote add upstream https://github.com/Skigim/Ravenswatcher.git
    git fetch upstream
-   git switch --create my-change --no-track upstream/release/0.1.7
+   git switch --create my-change --no-track upstream/release/0.1.8
    ```
 
    Choose a descriptive branch name in place of `my-change`. Keep each branch
@@ -53,7 +53,7 @@ release starts, update the branch named here to the new active release branch.
 On GitHub, open a pull request with these settings:
 
 - **Base repository:** `Skigim/Ravenswatcher`
-- **Base branch:** `release/0.1.7`
+- **Base branch:** `release/0.1.8`
 - **Head repository:** your fork
 - **Compare branch:** your change branch
 
@@ -67,7 +67,7 @@ With your changes committed and your change branch checked out, run:
 
 ```powershell
 git fetch upstream
-git merge upstream/release/0.1.7
+git merge upstream/release/0.1.8
 git push
 ```
 

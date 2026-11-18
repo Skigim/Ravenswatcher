@@ -27,11 +27,12 @@ export const SPAWNER_GO_RTTI = '.?AVoCEntitySpawnerGo@@\0';
 export const ENTITY_RTTI = '.?AVoCEntity@@\0';
 
 // ---- Static Pointer Chain RVAs ---------------------------------------------
-// Revalidated on 2026-10-12: both roots reached the independently scanned
-// spawner on Dark Hills. Cross-map stability on this game build is not yet
-// measured; the downstream layout and roster read matched (151 entries).
-export const GAME_SCENE_STATIC_RVA = 0x1438e90;
-export const GAME_STATIC_RVA = 0x146f8f8;
+// Measured 2026-11-17 after the patch: RTTI confirms both roots and each
+// chain reaches the same tile spawner. See docs/patch-compatibility.md.
+// Cross-map stability on this build is not yet measured; the live roster
+// decodes 151 entries on Dark Hills.
+export const GAME_SCENE_STATIC_RVA = 0x14401d0;
+export const GAME_STATIC_RVA = 0x1476c38;
 
 // ---- Struct offsets (confirmed live) ---------------------------------------
 // Spawner layout (oCDtEntityCpntTileSpawner):
@@ -514,7 +515,7 @@ export function resolveVtableSet(proc: ByteSource, base: number, rttiName: strin
  * Resolves oCDtEntityCpntTileSpawner via static module pointer chain.
  *
  * Candidate 1 (Direct Scene Anchor, default):
- *   MODULE + 0x1438E90 -> oCDtGameScene*
+ *   MODULE + GAME_SCENE_STATIC_RVA -> oCDtGameScene*
  *   scene + 0x658      -> oCGameLevel* head
  *   level + 0x80 / 88  -> GO array / count, searched for oCEntitySpawnerGo
  *   spawnerGo + 0x128  -> oCEntity*
